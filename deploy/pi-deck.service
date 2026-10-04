@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Deck Telegram bot management
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/pi-deck
+ExecStart=/opt/pi-deck/.venv/bin/python /opt/pi-deck/app.py --config /etc/pi-deck/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

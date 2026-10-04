@@ -1,0 +1,18 @@
+{
+  "secret_key": "REPLACE_WITH_RANDOM_SECRET",
+  "password_hash": "REPLACE_WITH_PASSWORD_HASH",
+  "username": "admin",
+  "session_minutes": 60,
+  "secure_cookie": false,
+  "bots": [
+    {
+      "id": "my-bot",
+      "name": "My Telegram bot",
+      "description": "Telegram automation",
+      "service": "my-bot.service",
+      "repo": "/home/pi/bots/my-bot",
+      "env": "/home/pi/bots/my-bot/.env",
+      "user": "pi"
+    }
+  ]
+}

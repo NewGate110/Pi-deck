@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+config.json
+*.bak
+*.log
+
+management-state.json
+.env
+.env.*
+!.env.example
+/*-dashboard.jpg
+/*-preview.jpg

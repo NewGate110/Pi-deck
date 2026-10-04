@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pi Deck · Bot management</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23c92330'/%3E%3Ctext x='7' y='23' fill='%23ffffff' font-size='24'%3Eπ%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script><script defer src="/static/management.js"></script>
+</head>
+<body>
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <div class="brand-mark">π</div>
+      <h1>Sign in to Pi Deck</h1>
+      <div id="demo-login" class="notice" hidden>Design preview · Sample bots only. Enter the demo to try the controls.</div>
+      <div id="credentials"><label>Username<input id="username" autocomplete="username" value="admin" required></label><label>Password<input id="password" type="password" autocomplete="current-password"></label></div>
+      <p id="login-error" role="alert"></p><button class="primary" id="login-button">Sign in →</button>
+    </form>
+  </section>
+  <div id="shell" class="shell" hidden>
+    <main>
+      <header class="topbar"><a href="/" class="brand"><span class="brand-mark">π</span><span>Pi Deck</span></a><button class="secondary" id="logout">Sign out</button></header>
+      <div class="workspace">
+        <div class="preview-banner" id="demo-banner" hidden><span>DEMO</span> Actions do not affect your Pi.</div>
+        <div class="page-title"><h1>Bots</h1><div class="title-actions"><button id="refresh" class="secondary">↻ &nbsp; Refresh</button><button id="add-bot" class="primary">+ Add bot</button></div></div>
+        <section class="health-panel" aria-label="Pi health"><div class="section-title"><h2>Pi health</h2><span id="connection-status" class="muted small" role="status">Connecting…</span></div><div id="health-values" class="health-values"></div></section>
+        <div class="management-toolbar"><button class="secondary" data-panel="jobs">Jobs</button><button class="secondary" data-panel="activity">Activity</button><button class="secondary" data-panel="discovery">Discover bots</button><button class="secondary" data-panel="schedules">Schedules</button><button class="secondary" data-panel="alerts">Alerts</button><button class="secondary" data-panel="account">Account</button><button class="secondary" data-panel="power">Pi power</button></div>
+        <div class="stats"><div><span class="stat-label">Total bots</span><strong id="total">—</strong></div><div><span class="stat-label"><i class="dot green"></i> Running</span><strong id="running">—</strong></div><div><span class="stat-label"><i class="dot gray"></i> Stopped</span><strong id="stopped">—</strong></div><div><span class="stat-label"><i class="dot orange"></i> Needs attention</span><strong id="attention">—</strong><small>Failed or unknown status</small></div></div>
+        <section class="bot-section"><div class="section-title"><h2>Your bots <span id="bot-count" class="pill">0</span></h2><span class="muted small" id="updated">Loading services…</span></div><div class="bulk-controls"><label><input type="checkbox" id="select-all"> Select all</label><span id="selected-count" class="muted small">0 selected</span><select id="bulk-action" aria-label="Bulk action"><option value="start">Start</option><option value="stop">Stop</option><option value="restart">Restart</option><option value="check">Check updates</option><option value="update">Update and restart</option><option value="backup">Back up configuration</option></select><button id="run-bulk" class="secondary" disabled>Run on selected</button></div><div id="bots"></div></section>
+      </div>
+    </main>
+  </div>
+  <dialog id="add-dialog" aria-labelledby="add-title">
+    <div class="dialog-header"><div><h2 id="add-title">Add a bot</h2></div><button id="close-add" class="icon-button" aria-label="Close add bot">✕</button></div>
+    <form id="add-form">
+      <div class="setup-modes"><label><input type="radio" name="mode" value="github" checked><strong>From GitHub</strong><small>Clone a repository and create a service.</small></label><label><input type="radio" name="mode" value="manual"><strong>Add manually</strong><small>Connect an existing bot on your Pi.</small></label></div>
+      <p class="notice" id="add-info">Create a new bot. It will stay stopped until you start it from the dashboard.</p>
+      <div class="form-grid">
+        <label>Bot name<input name="name" required maxlength="80" placeholder="My notification bot"></label>
+        <label>Bot ID<input name="id" required pattern="[a-z][a-z0-9-]{0,47}" placeholder="notification-bot"><small>Lowercase letters, numbers and hyphens.</small></label>
+        <label class="wide">Description<input name="description" maxlength="200" placeholder="What does this bot do?"></label>
+        <label>Linux user<input name="user" required value="pi"><small>Existing non-root account that owns the bot.</small></label>
+        <label>Service name<input name="service" required placeholder="notification-bot.service"></label>
+        <label class="wide github-field">GitHub repository<input name="url" placeholder="https://github.com/owner/repository" required><small>HTTPS or git@github.com:owner/repo. Private repos use the Linux user's existing Git credentials.</small></label>
+        <label class="wide">Repository directory<input name="repo" required placeholder="/home/pi/notification-bot"><small id="repo-hint">New directory in the user's home; its parent must already exist.</small></label>
+        <label class="wide">Environment file<input name="env" required placeholder="/home/pi/notification-bot/.env"></label>
+        <label class="wide github-field">Launch command<input name="command" required placeholder="/home/pi/notification-bot/.venv/bin/python main.py"><small>Absolute executable path and arguments. Runs inside the repository; shell operators are not supported.</small></label>
+        <label class="wide github-field checkbox-field"><input type="checkbox" name="python_setup" checked><span>Create a Python virtual environment and install requirements.txt, if present.</span></label>
+        <label class="wide github-field">Environment variables<textarea name="environment" spellcheck="false" placeholder="BOT_TOKEN=your-token&#10;ADMIN_CHAT_ID=your-chat-id"></textarea><small>Written to .env with private permissions. Values are visible while you enter them.</small></label>
+      </div>
+      <p id="add-error" class="error" role="alert"></p><p id="add-progress" class="muted small" role="status"></p>
+      <div class="dialog-footer"><button id="submit-add" class="primary">Create bot</button></div>
+    </form>
+  </dialog>
+  <dialog id="management-dialog" aria-labelledby="management-title"><div class="dialog-header"><h2 id="management-title">Management</h2><button class="icon-button" id="close-management" aria-label="Close management">✕</button></div><div id="management-content"></div><p id="management-error" class="error" role="alert"></p><p id="management-status" class="muted" role="status"></p></dialog>
+  <dialog id="detail"><div class="dialog-header"><div><p class="eyebrow" id="detail-type">BOT SETTINGS</p><h2 id="detail-title"></h2></div><button class="icon-button" id="close-detail" aria-label="Close editor">✕</button></div><p class="muted small" id="detail-path"></p><div id="file-warning" class="notice"></div><div class="editor-toolbar"><label id="reveal-label"><input type="checkbox" id="reveal"> Reveal environment values</label><span id="editor-label">File editor</span></div><textarea id="editor" spellcheck="false" aria-label="File contents"></textarea><div id="live-log-tools" class="log-tools" hidden><label><input id="logs-live" type="checkbox" checked> Live</label><input id="logs-search" type="search" aria-label="Search logs" placeholder="Search logs"><select id="logs-priority" aria-label="Log severity"><option value="all">All severities</option><option value="warning">Warning and above</option><option value="error">Error and above</option></select><button id="download-logs" class="secondary">Download</button></div><pre id="log-content" tabindex="0" hidden></pre><button id="preview-changes" class="secondary" hidden>Preview changes</button><pre id="change-preview" hidden tabindex="0" aria-label="Current and proposed file contents"></pre><p id="dialog-error" class="error" role="alert"></p><div class="dialog-footer"><span class="muted small" id="save-note">Saving does not restart the bot.</span><button id="save-file" class="primary">Save changes</button><button id="refresh-logs" class="secondary" hidden>↻ Refresh logs</button></div></dialog>
+  <dialog id="confirm-dialog"><h2 id="confirm-title"></h2><p id="confirm-text" class="muted"></p><div class="confirm-buttons"><button id="cancel-action" class="secondary">Cancel</button><button id="confirm-action" class="primary">Confirm</button></div></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
