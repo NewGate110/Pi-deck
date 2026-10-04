@@ -17,7 +17,7 @@ GitHub setup supports HTTPS and `git@github.com:owner/repo` URLs; private reposi
 
 If setup fails after cloning starts, the new checkout is kept for inspection and the bot is not registered. Any newly created service is removed. Finish setup on the Pi and register manually, or retry with a different new directory. Existing directories, environment files, and services are never overwritten. Repositories that contain a committed `.env` must be configured manually. Live provisioning needs verification on your Pi; the demo performs no actual installation.
 
-## Preview on this PC
+## Preview on PC
 
 ```powershell
 python -m venv .venv
