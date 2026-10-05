@@ -1,5 +1,6 @@
 """Private state, bounded background jobs, backups and host telemetry."""
 import copy
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,36 @@ def progress(message):
         store, job = context
         with store.lock:
             job['message'] = message
+            job.setdefault('steps', []).append(dict(message=message, time=time.time(), state='info'))
+            del job['steps'][:-200]
+            store.save()
+
+
+@contextmanager
+def job_step(message):
+    """Record trusted operation descriptions, never command arguments or output."""
+    context = getattr(job_context, 'current', None)
+    if not context:
+        yield
+        return
+    store, job = context
+    entry = dict(message=message, time=time.time(), state='running')
+    started = time.monotonic()
+    with store.lock:
+        job['message'] = message
+        job.setdefault('steps', []).append(entry)
+        del job['steps'][:-200]
+        store.save()
+    try:
+        yield
+    except BaseException:
+        entry_state = 'failed'
+        raise
+    else:
+        entry_state = 'succeeded'
+    finally:
+        with store.lock:
+            entry.update(state=entry_state, duration=round(time.monotonic()-started, 2))
             store.save()
 
 
@@ -48,6 +79,8 @@ class Store:
         for job in self.data['jobs']:
             if job['state'] in ('queued', 'running'):
                 job.update(state='interrupted', message='Manager restarted. Check the bot before retrying.')
+                for step in job.get('steps', []):
+                    if step['state'] == 'running': step['state'] = 'interrupted'
 
     def save(self):
         if self.path: private_json(self.path, self.data)
@@ -83,11 +116,22 @@ class Jobs:
         self.queue=queue.Queue(maxsize=32)
         self.worker=None
         self.start_lock=threading.Lock()
+        self.accepting=True
+
+    def pause_for_restart(self):
+        with self.start_lock:
+            if not self.accepting:raise ValueError('A dashboard restart is already pending.')
+            if self.queue.unfinished_tasks:raise ValueError('Wait for all background jobs to finish before restarting Pi Deck.')
+            self.accepting=False
+
+    def resume_submissions(self):
+        with self.start_lock:self.accepting=True
 
     def submit(self, label, callback, bot=''):
         with self.start_lock:
+            if not self.accepting:raise ValueError('Pi Deck is restarting. Retry after reconnecting.')
             if self.queue.full(): raise ValueError('Job queue is full. Try again after current work finishes.')
-            job=dict(id=secrets.token_hex(10), label=label, bot=bot, time=time.time(), state='queued', message='Waiting', result=None)
+            job=dict(id=secrets.token_hex(10), label=label, bot=bot, time=time.time(), state='queued', message='Waiting', result=None, steps=[])
             with self.store.lock:
                 active=[j for j in self.store.data['jobs'] if j['state'] in ('queued','running')]
                 finished=[j for j in self.store.data['jobs'] if j['state'] not in ('queued','running')][:60]
@@ -106,13 +150,16 @@ class Jobs:
                 with self.store.lock:
                     job.update(state='running',message='Working'); self.store.save()
                 job_context.current=(self.store,job)
+                progress('Started: '+job['label'] + (' · '+job['bot'] if job['bot'] else ''))
                 result=callback()
+                progress('Finished: '+job['label'])
                 with self.store.lock:
                     job.update(state='succeeded',message='Completed',result=result); self.store.save()
                 self.store.event(job['label'],job['bot'])
             except Exception as exc:
                 # Never record raw subprocess output, credentials or payloads.
                 message=str(exc) if isinstance(exc,ValueError) else 'Operation failed. Check the Pi and retry.'
+                progress('Failed: '+message[:600])
                 with self.store.lock:
                     job.update(state='failed',message=message[:600]); self.store.save()
                 self.store.event(job['label'],job['bot'],'failed')

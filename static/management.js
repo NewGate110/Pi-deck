@@ -1,5 +1,6 @@
 /* Operational UI. All remote values are escaped before rendering. */
 const selectedBots=new Set();
+let gitReview=null;
 let managementPanel=null, managementBot=null, managementRevision=null, panelLoading=false, telemetryBusy=false, logsBusy=false;
 const dateText=t=>t?new Date(t*1000).toLocaleString():'—';
 const input=(name,label,value='',type='text')=>`<label>${esc(label)}<input name="${esc(name)}" type="${type}" value="${esc(value)}" ${type==='password'?'autocomplete="new-password"':''}></label>`;
@@ -29,7 +30,7 @@ async function refreshHealth(){
   finally{telemetryBusy=false;}
 }
 function showManagement(title,panel,bot=null){
-  managementPanel=panel;managementBot=bot;managementRevision=null;
+  gitReview=null;managementPanel=panel;managementBot=bot;managementRevision=null;
   $('management-title').textContent=title;$('management-content').innerHTML='<p class="muted">Loading…</p>';$('management-error').textContent='';$('management-status').textContent='';
   if(!$('management-dialog').open)$('management-dialog').showModal();
 }
@@ -37,10 +38,21 @@ $('close-management').onclick=()=>{$('management-dialog').close();managementPane
 $('management-dialog').addEventListener('close',()=>{managementPanel=null;managementBot=null;});
 document.querySelectorAll('[data-panel]').forEach(button=>button.onclick=()=>openPanel(button.dataset.panel));
 async function openPanel(panel){
-  showManagement({jobs:'Background jobs',activity:'Activity history',discovery:'Discover existing services',schedules:'Scheduled actions',alerts:'Telegram alerts',account:'Account settings',power:'Pi power'}[panel],panel);
+  showManagement({jobs:'Background jobs',activity:'Activity history',discovery:'Discover existing services',schedules:'Scheduled actions',alerts:'Telegram alerts',account:'Account settings',power:'Pi power',system:'Pi Deck updates'}[panel],panel);
   try{
     if(panel==='jobs'||panel==='activity'){await refreshPanel();return;}
-    if(panel==='discovery'){
+    if(panel==='system'){
+      const info=await api('system/update'),s=info.state;
+      if(managementPanel!==panel)return;
+      $('management-content').innerHTML=`<p class="notice">${info.demo?'Demo only: application updates and restarts are simulated.':'Updates run as the dashboard service account (root in the supplied installation). Only update from a trusted upstream.'}</p><p class="muted">Checkout: ${esc(info.repo)}<br>Service: ${esc(info.service)}<br>Commit: ${esc(s.current||'Not checked')} · ${esc(s.branch||'Unknown branch')} · ${s.behind??'Unknown'} behind</p>
+      <p class="notice">Update code, install changed requirements, then restart Pi Deck. The dashboard will disconnect briefly; your bots keep running. Restart waits for the background queue to be empty.</p>
+      ${s.restart_required?'<p class="notice">Application files changed. Restart Pi Deck when ready.</p>':''}
+      <button class="secondary" data-system-review="1">Review changes / force update</button>
+      <div class="maintenance-actions">${[['check','Check updates'],['pull','Pull latest'],['dependencies','Install requirements'],['rollback','Roll back code'],['resume','Return to branch']].map(([action,label])=>`<button class="secondary" data-system-action="${action}">${label}</button>`).join('')}</div>
+      <p class="muted">Code rollback does not undo dependency or state changes. Private configuration and state are backed up outside the checkout before modifying code.</p>
+      ${s.private_backup?`<p class="muted">Private backup: ${esc(s.private_backup)}</p>`:''}${s.recovery?`<p class="muted">Recovery ref: <code>${esc(s.recovery.ref)}</code><br>Original commit: <code>${esc(s.recovery.head)}</code></p>`:''}
+      <form id="system-restart-form" class="form-grid">${input('confirm','Type pi-deck to restart the dashboard')}<button class="danger" ${info.restart_pending?'disabled':''}>Restart Pi Deck</button></form>`;
+    }else if(panel==='discovery'){
       const data=await api('discovery');
       $('management-content').innerHTML='<p class="notice">Local services are candidates, not automatically identified bots. Verify paths and ownership before importing.</p>'+data.services.map(s=>`<div class="list-row"><div><strong>${esc(s.service)}</strong><p class="muted small">${esc(s.description)}</p></div><button class="secondary" data-import="${esc(s.service)}">Import manually</button></div>`).join('')+(data.services.length?'':'<p class="muted">No unregistered local services found.</p>');
     }else if(panel==='schedules'){await renderSchedules();}
@@ -56,13 +68,17 @@ async function openPanel(panel){
     }
   }catch(e){$('management-error').textContent=e.message;}
 }
+function jobSteps(job){
+  if(!job.steps?.length)return '<p class="muted small">'+(job.state==='queued'?'Steps will appear when this job starts.':'Step history is unavailable for this older job.')+'</p>';
+  return '<ol class="job-steps" aria-label="Job step history">'+job.steps.map(step=>`<li data-state="${esc(step.state)}"><div><strong>${esc(step.message)}</strong><span class="muted small">${esc(step.state==='info'?'Recorded':step.state)} · ${esc(dateText(step.time))}${step.duration!=null?' · '+esc(step.duration)+'s':''}</span></div></li>`).join('')+'</ol>';
+}
 async function refreshPanel(){
   if(panelLoading||!$('management-dialog').open)return;panelLoading=true;
   const panel=managementPanel;
   try{
     if(panel==='jobs'){
       const data=await api('jobs');if(managementPanel!==panel)return;
-      $('management-content').innerHTML=data.jobs.map(j=>`<div class="list-row"><div><strong>${esc(j.label)} ${esc(j.bot)}</strong><p class="muted small">${dateText(j.time)} · ${esc(j.state)}</p><p>${esc(j.message)}</p>${j.result?`<p class="muted">${esc(j.result.message||'')}</p>${j.result.current?`<p class="muted small">Commit ${esc(j.result.current)} · ${esc(j.result.branch||'detached')} · ${j.result.behind??'Unknown'} behind</p>`:''}${(j.result.results||[]).map(r=>`<p class="muted small">${esc(r.bot)}: ${esc(r.outcome)}</p>`).join('')}`:''}</div></div>`).join('')||'<p class="muted">No jobs yet.</p>';
+      $('management-content').innerHTML=data.jobs.map(j=>`<div class="list-row"><div><strong>${esc(j.label)} ${esc(j.bot)}</strong><p class="muted small">${dateText(j.time)} · ${esc(j.state)}</p><p>${esc(j.message)}</p>${j.result?`<p class="muted">${esc(j.result.message||'')}</p>${j.result.current?`<p class="muted small">Commit ${esc(j.result.current)} · ${esc(j.result.branch||'detached')} · ${j.result.behind??'Unknown'} behind</p>`:''}${(j.result.results||[]).map(r=>`<p class="muted small">${esc(r.bot)}: ${esc(r.outcome)}</p>`).join('')}`:''}${jobSteps(j)}</div></div>`).join('')||'<p class="muted">No jobs yet.</p>';
     }else if(panel==='activity'){
       const data=await api('activity');if(managementPanel!==panel)return;
       $('management-content').innerHTML=data.events.map(e=>`<div class="list-row"><span>${esc(e.action)} · ${esc(e.bot)} · ${esc(e.outcome)}</span><time class="muted small">${dateText(e.time)}</time></div>`).join('')||'<p class="muted">No activity yet.</p>';
@@ -80,11 +96,43 @@ async function openBotManagement(bot){
     if(managementBot?.id!==bot.id)return;
     managementRevision=settings.revision;
     const b=settings.bot,v=versions.versions[bot.id];
-    $('management-content').innerHTML=`<details open><summary>Registration settings</summary><p class="muted small">These paths tell Pi Deck which files to manage. Change the runtime and launch command in Service file.</p><form id="bot-settings-form" class="form-grid">${input('name','Name',b.name)}${input('description','Description',b.description)}${input('user','Linux owner',b.user)}${input('service','Systemd service',b.service)}${input('repo','Repository path',b.repo)}${input('env','Environment file',b.env)}<button class="primary">Save settings</button><button type="button" class="secondary" data-edit-service="${esc(bot.id)}">Edit service / launch command</button></form></details>
-    <details open><summary>Updates and dependencies</summary><p class="muted small">${v?`Commit ${esc(v.current||'unknown')} · ${esc(v.branch||'unknown')} · ${v.behind??'Unknown'} behind · checked ${dateText(v.checked)}`:'No update check yet.'}</p><p class="notice">Rollback changes code only and leaves a detached checkout. It does not undo dependency or database changes. Return to branch before pulling again. Restart separately after rollback.</p><div class="maintenance-actions">${[['check','Check updates'],['pull','Pull latest'],['update','Update and restart'],['dependencies','Install requirements'],['rollback','Roll back code'],['resume','Return to branch']].map(([action,label])=>`<button class="secondary" data-maintenance="${action}">${label}</button>`).join('')}</div></details>
+    $('management-content').innerHTML=`<details open><summary>Registration settings</summary><p class="muted small">These paths tell Pi Deck which files to manage. Change the runtime and launch command in Service file.</p><form id="bot-settings-form" class="form-grid">${input('name','Name',b.name)}${input('description','Description',b.description)}${iconPicker(b.icon)}${input('user','Linux owner',b.user)}${input('service','Systemd service',b.service)}${input('repo','Repository path',b.repo)}${input('env','Environment file (optional; leave blank if unused)',b.env)}<button class="primary">Save settings</button><button type="button" class="secondary" data-edit-service="${esc(bot.id)}">Edit service / launch command</button></form></details>
+    <details open><summary>Updates and dependencies</summary><p class="muted small">${v?`Commit ${esc(v.current||'unknown')} · ${esc(v.branch||'unknown')} · ${v.behind??'Unknown'} behind · checked ${dateText(v.checked)}`:'No update check yet.'}</p><p class="notice">Rollback changes code only and leaves a detached checkout. It does not undo dependency or database changes. Return to branch before pulling again. Restart separately after rollback.</p><button type="button" class="secondary" data-review-git="1">Review changes / force update</button><div class="maintenance-actions">${[['check','Check updates'],['pull','Pull latest'],['update','Update and restart'],['dependencies','Install requirements'],['rollback','Roll back code'],['resume','Return to branch']].map(([action,label])=>`<button class="secondary" data-maintenance="${action}">${label}</button>`).join('')}</div></details>
     <details><summary>Configuration backups (${backups.backups.length})</summary><p class="muted small">Latest 20 copies per file. A backup is created before each save. Preview an older file, then save it to restore.</p><button class="secondary" data-maintenance="backup">Back up now</button>${backups.backups.map(b=>`<div class="list-row"><span>${esc(b.kind)} · ${dateText(b.time)}</span><button class="secondary" data-backup="${b.id}">Preview / restore</button></div>`).join('')||'<p class="muted">No file backups yet.</p>'}</details>
     <details><summary>Remove bot</summary><p class="notice">Unregister keeps the service running and all files intact. Uninstall stops and disables the service, backs it up, and removes only its service file. Repository and environment files are always retained.</p><form id="remove-form" class="form-grid">${input('confirm','Type bot ID: '+bot.id)}<label class="checkbox-field"><input type="checkbox" name="uninstall"> Also uninstall the service</label><button class="danger">Remove bot</button></form></details>`;
   }catch(e){$('management-error').textContent=e.message;}
+}
+function diffMarkup(patch){
+  if(!patch)return '<p class="muted">No changes.</p>';
+  let oldLine=0,newLine=0,rows=[],files=[],name='Changes';
+  const flush=()=>{if(rows.length)files.push(`<details class="diff-file" open><summary>${esc(name)}</summary><div class="diff-scroll"><table class="diff-table" aria-label="Code changes"><tbody>${rows.join('')}</tbody></table></div></details>`);rows=[];};
+  for(const line of patch.split('\n').slice(0,4000)){
+    if(line.startsWith('diff --git ')){flush();name=line.slice(11);oldLine=0;newLine=0;continue;}
+    const hunk=line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if(hunk){oldLine=Number(hunk[1]);newLine=Number(hunk[2]);}
+    const meta=hunk||(!oldLine&&!newLine);
+    const added=!meta&&line.startsWith('+'),removed=!meta&&line.startsWith('-'),context=!meta&&line.startsWith(' ');
+    const left=removed||context?oldLine++:'',right=added||context?newLine++:'';
+    rows.push(`<tr class="${meta?'diff-meta':added?'diff-add':removed?'diff-remove':''}"><td class="diff-number">${left}</td><td class="diff-number">${right}</td><td><code>${esc(line)}</code></td></tr>`);
+  }
+  flush();return files.join('');
+}
+async function openGitReview(bot){
+  showManagement(bot.name+' · Review code changes','git-review',bot);
+  try{
+    const data=await api(bot.system?'system/git-preview':`bots/${bot.id}/git-preview`,'POST',{});
+    if(managementPanel!=='git-review'||managementBot?.id!==bot.id)return;
+    gitReview=data;
+    const recovery=data.recovery;
+    $('management-content').innerHTML=`<p class="notice">${data.demo?'Demo diff — sample code only. ':''}Review the changes before replacing local code. Force update resets this branch to the reviewed upstream commit, including replacing local commits and staged or unstaged edits. ${bot.system?'Pi Deck':'The bot'} is not restarted.</p>
+      <p class="muted">${esc(data.branch)} → ${esc(data.upstream)} · ${data.ahead} local commits · ${data.behind} incoming commits<br>Reviewed target: ${esc(data.target)}</p>
+      <p class="muted">A local Git recovery ref is saved before replacement. Untracked and ignored files are retained; conflicting paths block the update. Avoid editing the checkout while the job runs.</p>
+      ${recovery?`<p class="notice">Last recovery ref: <code>${esc(recovery.ref)}</code><br>Original commit: <code>${esc(recovery.head)}</code>${recovery.stash?`<br>Recover saved edits on the Pi with <code>git stash apply --index ${esc(recovery.ref)}</code> after returning to the original commit.`:''}</p>`:''}
+      ${data.sections.map(section=>`<section class="diff-section"><h3>${esc(section.title)}</h3>${diffMarkup(section.patch)}</section>`).join('')}
+      <p class="muted">${data.untracked_count} untracked/ignored paths retained${data.untracked.length?': '+data.untracked.map(esc).join(', '):'.'}</p>
+      ${data.blockers.map(reason=>`<p class="error">${esc(reason)}</p>`).join('')}
+      <form id="force-update-form" class="form-grid"><p class="notice wide">Only continue if you are satisfied the local changes can be replaced. This does not install dependencies or restart ${bot.system?'Pi Deck':'the bot'}.</p>${input('confirm','Type '+bot.id+' to confirm')}<button class="danger" ${data.can_force?'':'disabled'}>Back up and force update</button></form>`;
+  }catch(e){if(managementPanel==='git-review'&&managementBot?.id===bot.id)$('management-error').textContent=e.message;}
 }
 $('management-dialog').addEventListener('click',async e=>{
   const button=e.target.closest('button');if(!button)return;
@@ -92,8 +140,14 @@ $('management-dialog').addEventListener('click',async e=>{
   if(!Object.keys(d).length)return;
   button.disabled=true;
   try{
-    if(d.import){
-      $('management-dialog').close();$('add-bot').click();field('mode').value='manual';setAddMode();field('service').value=d.import;field('id').value=d.import.replace(/\.service$/,'').toLowerCase().replace(/[^a-z0-9-]/g,'-');field('name').value=d.import.replace(/\.service$/,'');
+    if(d.reloadDashboard){location.reload();
+    }else if(d.systemReview){await openGitReview({id:'pi-deck',name:'Pi Deck',system:true});
+    }else if(d.systemAction){
+      if(d.systemAction!=='check'&&!window.confirm('Run '+d.systemAction+' for Pi Deck itself? Application code and dependencies run with dashboard administrator privileges. Restart separately when ready.'))return;
+      await api('system/update','POST',{action:d.systemAction});await openPanel('jobs');
+    }else if(d.reviewGit){await openGitReview(managementBot);
+    }else if(d.import){
+      $('management-dialog').close();$('add-bot').click();field('mode').value='manual';setAddMode();field('service').value=d.import;await detectService();
     }else if(d.maintenance){
       if(['update','rollback','resume','dependencies'].includes(d.maintenance)&&!window.confirm('Run '+d.maintenance+' for '+managementBot.name+'? Dependency installation executes package code as the bot owner.'))return;
       await api(`bots/${managementBot.id}/maintenance`,'POST',{action:d.maintenance});$('management-status').textContent='Queued. See Jobs for progress and results.';
@@ -119,7 +173,17 @@ $('management-content').addEventListener('submit',async e=>{
   e.preventDefault();const form=e.target;const data=Object.fromEntries(new FormData(form));const submit=form.querySelector('button[type=submit],button:not([type])');if(submit)submit.disabled=true;
   $('management-error').textContent='';$('management-status').textContent='';
   try{
-    if(form.id==='bot-settings-form'){
+    if(form.id==='force-update-form'){
+      if(!gitReview||!gitReview.can_force)throw new Error('Load a complete preview first.');
+      const bot=managementBot;
+      await api(bot.system?'system/update':`bots/${bot.id}/force-update`,'POST',{action:'force',confirm:data.confirm,revision:gitReview.revision});
+      gitReview=null;
+      await openPanel('jobs');
+      toast('Force update queued. See the job steps and recovery reference.');
+    }else if(form.id==='system-restart-form'){
+      const result=await api('system/restart','POST',data);$('management-status').textContent=result.message;
+      if(!demo){$('management-content').innerHTML='<p class="notice">Pi Deck is restarting. The dashboard may disconnect briefly.</p><button class="primary" data-reload-dashboard="1">Reload dashboard</button>';}
+    }else if(form.id==='bot-settings-form'){
       await api(`bots/${managementBot.id}/settings`,'PUT',{...data,revision:managementRevision});await refresh();await openBotManagement(bots.find(b=>b.id===managementBot.id));$('management-status').textContent='Settings saved.';
     }else if(form.id==='remove-form'){
       await api(`bots/${managementBot.id}/remove`,'POST',{...data,uninstall:form.elements.uninstall.checked});$('management-status').textContent='Removal queued. See Jobs for the result.';

@@ -13,11 +13,17 @@ Choose **+ Add bot** and select one of two options:
 
 Both paths save to the active configuration and appear immediately, without restarting the dashboard. Duplicate IDs, services, and checkout paths are rejected. If configuration was edited externally, restart the dashboard before adding another bot. Demo additions exist only in memory.
 
+Manual setup reads the existing service's effective `Description`, `User`, `WorkingDirectory` and `EnvironmentFiles` when you enter its name or click **Read service settings**. **Discover bots → Import manually** loads these automatically. Review and edit the detected fields before adding. If multiple environment files are configured, choose which file Pi Deck should manage; missing or unsupported settings stay blank with an explanation. Environment contents are never read by detection. Demo lookup uses the sample `weather-bot.service`.
+
 GitHub setup supports HTTPS and `git@github.com:owner/repo` URLs; private repositories require Git credentials already configured for the Linux owner. Python setup requires `python3-venv` on the Pi. Dependencies run as the bot owner and can execute repository/package code, so use repositories you trust. Other runtimes must already be installed; uncheck Python setup and enter the appropriate absolute launch command. Shell operators are not supported in the launch command.
 
 If setup fails after cloning starts, the new checkout is kept for inspection and the bot is not registered. Any newly created service is removed. Finish setup on the Pi and register manually, or retry with a different new directory. Existing directories, environment files, and services are never overwritten. Repositories that contain a committed `.env` must be configured manually. Live provisioning needs verification on your Pi; the demo performs no actual installation.
 
 ## Preview on this PC
+
+Environment files are optional. For manual setup, leave the environment path blank if the bot does not use a file. For GitHub setup, uncheck **Create an environment file**. Pi Deck then omits `EnvironmentFile` from the generated service, skips environment backups, and shows **No environment file** on the bot card. Set a path later in registration settings to manage an existing file; service runtime settings remain separately editable.
+
+Choose a bot icon from the list when adding a bot, or change it later in **Settings & maintenance**. Icons are stored with the registration; older registrations default to the robot icon.
 
 ```powershell
 python -m venv .venv
@@ -38,6 +44,14 @@ The main file is `/etc/pi-deck/config.json`: login username, password hash, sess
 If you already installed using `/opt/pi-deck/config.json`, stop Pi Deck and move that file and its sibling management-state.json into a root-owned `/etc/pi-deck` directory (mode 700) before installing the updated service. Preserve file permissions (600) and keep a private backup. Do not regenerate existing credentials. Custom service installations can retain their existing `--config` path instead.
 
 The manager runs as root because it edits system services and controls systemd. Treat its login as full administrator access to the Pi. Keep its application files and configuration root-owned. Only bots listed in the local configuration are exposed. Git runs as the configured non-root bot owner, using that owner's existing Git/SSH credentials. Set up GitHub access and the branch upstream in each checkout before using Pull latest; interactive credential prompts are disabled.
+
+## Update Pi Deck itself
+
+Open **Pi Deck updates** for update checks, diff previews, normal pulls, confirmed force updates, requirements installation, rollback and return-to-branch controls. Updates target the running dashboard's source checkout and its configured Git upstream. Normal pulls require a clean checkout; force updates use the same reviewed-commit checks and recovery refs as bot updates.
+
+The supplied root service performs these operations as root, including dependency installation. Private config and management state must live outside the checkout and are backed up before code changes. Application updates do not change bot services. After installing any changed requirements, choose **Restart Pi Deck** and type `pi-deck`. Restart is refused while jobs are queued or running. Reload the browser after reconnecting. Demo actions never update or restart the actual application.
+
+The optional private config key `manager_service` identifies the dashboard's unit (default `pi-deck.service`). The service's MainPID is checked before restart. See the [deployment and recovery guide](deploy/GITHUB.md) for SSH recovery if updated code cannot start, and for private backup locations. Code rollback does not roll back dependencies or private state.
 
 ## Connect from your PC
 
@@ -84,6 +98,22 @@ Security/session behaviour follows [Flask's security guidance](https://flask.pal
 - **Power:** explicitly type REBOOT or POWEROFF before submitting. Demo mode only simulates the action. Health polling retries after disconnect; shutting down requires manually powering the Pi on again.
 
 ### Private storage and operation
+
+### Review local code before a force update
+
+Open **Settings & maintenance → Review changes / force update**. The preview fetches the configured upstream and shows staged edits, unstaged edits, local commits, and incoming changes with colored diff lines and line numbers. The normal Pull latest button still refuses dirty checkouts.
+
+After reviewing, type the bot ID and choose **Back up and force update**. This queues a replacement of tracked code with the exact reviewed upstream commit (`git reset --hard`), including replacing local commits. A changed checkout or upstream invalidates the preview. Avoid editing the checkout while the job runs. Dependencies are not installed and the service is not restarted.
+
+Before replacement, Pi Deck records a local recovery ref under `refs/pi-deck/recovery/`. It preserves the original commit and, when present, staged and unstaged tracked edits. The ref is shown in Jobs and on the next review. On the Pi, recover the original commit first, then use the displayed `git stash apply --index REF` command for saved edits. Recovery refs remain in the checkout until manually removed; they are not pushed to GitHub. Keep external backups too.
+
+Untracked and ignored files are retained. Force update is blocked for conflicting untracked paths, tracked environment files, submodules, unfinished Git operations, hidden index changes, binary diffs, or previews exceeding 4,000 lines / 250,000 characters. Those cases require review on the Pi. Diffs may contain sensitive code or configuration and are only available to the signed-in administrator. Demo previews and force updates are simulations.
+
+See the Git documentation for [reset](https://git-scm.com/docs/git-reset) and [stash recovery snapshots](https://git-scm.com/docs/git-stash).
+
+### Private state
+
+Background jobs include a live step history with timestamps, command durations, and failure exit codes. Open Jobs to follow setup, Git operations, dependency installation, service actions and backups. The latest 200 steps per job are retained with private management state; older jobs created before this feature have no step history. Command descriptions are recorded without raw arguments, environment values or stdout/stderr. Demo steps are labelled as simulations.
 
 `management-state.json` is created beside the active configuration, atomically written with mode 0600 on Linux, and excluded from Git. It contains backups (which may include secrets), alert credentials, recent jobs/activity, version metadata and schedules. Protect it as carefully as `.env` and config.json; do not upload it or commit it. Demo state stays in memory. Run only one Pi Deck process per configuration/state directory. No external cloud service is used for management state.
 

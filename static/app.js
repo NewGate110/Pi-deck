@@ -37,15 +37,23 @@ async function refresh() {
     $('updated').textContent='Updated '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   } catch(e){$('updated').textContent='Refresh failed'; throw e;} finally{$('refresh').disabled=false;}
 }
+const botIcons=Object.fromEntries([...document.querySelectorAll('symbol[data-bot-icon]')].map(icon=>[icon.dataset.botIcon,icon.dataset.label]));
+function botIcon(key){
+  const icon=Object.hasOwn(botIcons,key)?key:'bot';
+  return `<svg class="line-icon" aria-hidden="true"><use href="#bot-icon-${esc(icon)}"/></svg>`;
+}
+function iconPicker(selected='bot'){
+  return '<fieldset class="icon-picker wide"><legend>Bot icon</legend><div class="icon-options">'+Object.entries(botIcons).map(([key,label])=>`<label class="icon-choice"><input type="radio" name="icon" value="${esc(key)}" ${key===selected?'checked':''}><span class="icon-tile">${botIcon(key)}<span>${esc(label)}</span></span></label>`).join('')+'</div></fieldset>';
+}
 function render() {
   $('total').textContent=bots.length; $('bot-count').textContent=bots.length;
   $('running').textContent=bots.filter(b=>b.state==='active').length;
   $('stopped').textContent=bots.filter(b=>b.state==='inactive').length;
   $('attention').textContent=bots.filter(b=>!['active','inactive'].includes(b.state)).length;
   $('bots').innerHTML=bots.length?bots.map((b,i)=>`<article class="bot-card">
-    <div class="bot-top"><input type="checkbox" class="bot-select" data-select="${esc(b.id)}" aria-label="Select ${esc(b.name)}" ${typeof selectedBots!=='undefined'&&selectedBots.has(b.id)?'checked':''}><div class="bot-icon">${['↗','✳','↓'][i%3]}</div><div><h3 class="bot-name">${esc(b.name)}</h3><div class="bot-description">${esc(b.description)}</div></div><span class="bot-status ${esc(b.state)}"><i class="dot ${b.state==='active'?'green':b.state==='inactive'?'gray':'orange'}"></i>${esc(b.state==='active'?'Running':b.state==='inactive'?'Stopped':b.state)}</span></div>
+    <div class="bot-top"><input type="checkbox" class="bot-select" data-select="${esc(b.id)}" aria-label="Select ${esc(b.name)}" ${typeof selectedBots!=='undefined'&&selectedBots.has(b.id)?'checked':''}><div class="bot-icon" title="${esc(botIcons[b.icon]||botIcons.bot)}" aria-hidden="true">${botIcon(b.icon)}</div><div><h3 class="bot-name">${esc(b.name)}</h3><div class="bot-description">${esc(b.description)}</div></div><span class="bot-status ${esc(b.state)}"><i class="dot ${b.state==='active'?'green':b.state==='inactive'?'gray':'orange'}"></i>${esc(b.state==='active'?'Running':b.state==='inactive'?'Stopped':b.state)}</span></div>
     <div class="bot-middle"><span class="service-name">▤ &nbsp; ${esc(b.service)}</span><span class="startup">Start on boot <button class="toggle ${b.enabled?'on':''}" role="switch" aria-checked="${b.enabled}" aria-label="Start ${esc(b.name)} on boot" data-bot="${esc(b.id)}" data-action="${b.enabled?'disable':'enable'}"></button></span></div>
-    <div class="bot-bottom"><div class="tools"><button class="tool-button" data-bot="${esc(b.id)}" data-manage="1">Settings & maintenance</button><button class="tool-button" data-bot="${esc(b.id)}" data-file="env">≡ &nbsp; Environment</button><button class="tool-button" data-bot="${esc(b.id)}" data-file="service">▤ &nbsp; Service file</button><button class="tool-button" data-bot="${esc(b.id)}" data-file="logs">⌁ &nbsp; Logs</button><button class="tool-button" data-bot="${esc(b.id)}" data-action="pull">↓ &nbsp; Pull latest</button></div><div class="run-controls"><button class="secondary" data-bot="${esc(b.id)}" data-action="restart">↻ &nbsp; Restart</button><button class="${b.state==='active'?'secondary':'primary'}" data-bot="${esc(b.id)}" data-action="${b.state==='active'?'stop':'start'}">${b.state==='active'?'◼ &nbsp; Stop':'▷ &nbsp; Start'}</button></div></div>
+    <div class="bot-bottom"><div class="tools"><button class="tool-button" data-bot="${esc(b.id)}" data-manage="1">Settings & maintenance</button>${b.env?`<button class="tool-button" data-bot="${esc(b.id)}" data-file="env">≡ &nbsp; Environment</button>`:'<span class="no-environment">No environment file</span>'}<button class="tool-button" data-bot="${esc(b.id)}" data-file="service">▤ &nbsp; Service file</button><button class="tool-button" data-bot="${esc(b.id)}" data-file="logs">⌁ &nbsp; Logs</button><button class="tool-button" data-bot="${esc(b.id)}" data-action="pull">↓ &nbsp; Pull latest</button></div><div class="run-controls"><button class="secondary" data-bot="${esc(b.id)}" data-action="restart">↻ &nbsp; Restart</button><button class="${b.state==='active'?'secondary':'primary'}" data-bot="${esc(b.id)}" data-action="${b.state==='active'?'stop':'start'}">${b.state==='active'?'◼ &nbsp; Stop':'▷ &nbsp; Start'}</button></div></div>
   </article>`).join(''):'<div class="empty">No bots configured yet. Choose Add bot to create one from GitHub or connect an existing service.</div>';
 }
 function confirmAction(title,message) {
@@ -122,14 +130,18 @@ $('refresh-logs').onclick=async()=>{
   if(!editing)return; $('refresh-logs').disabled=true;
   try{await updateLiveLogs();}catch(e){$('dialog-error').textContent=e.message;}finally{$('refresh-logs').disabled=false;}
 };
-let adding=false;
+let adding=false, detectionRequest=0, detecting=false;
 const addForm=$('add-form');
 const field=name=>addForm.elements.namedItem(name);
 function setAddMode(){
+  detectionRequest++;detecting=false;$('detect-service').disabled=false;
   const github=field('mode').value==='github';
+  $('manual-detect').hidden=github;
+  $('detect-status').textContent='';$('detected-env-label').hidden=true;
   document.querySelectorAll('.github-field').forEach(el=>{el.hidden=!github;el.querySelectorAll('input,textarea').forEach(input=>input.disabled=!github);});
+  syncEnvironmentMode();
   field('env').readOnly=github;
-  if(github&&field('repo').value)field('env').value=field('repo').value.replace(/\/$/,'')+'/.env';
+  if(github&&field('use_environment').checked&&field('repo').value)field('env').value=field('repo').value.replace(/\/$/,'')+'/.env';
   $('submit-add').textContent=github?'Create bot':'Add existing bot';
   $('repo-hint').textContent=github?"New directory in the user's home; its parent must already exist.":'Existing Git checkout on the Pi.';
   $('add-info').textContent=demo?'Demo only: no repositories, files or services will be created on your Pi.':github?'Create a new bot. It will stay stopped until you start it from the dashboard.':'Register the existing service and files. Their contents and running state will be preserved.';
@@ -138,19 +150,57 @@ $('add-bot').onclick=()=>{addForm.reset();$('add-error').textContent='';$('add-p
 addForm.querySelectorAll('[name=mode]').forEach(el=>el.onchange=setAddMode);
 field('id').oninput=()=>{
   const id=field('id').value;
-  field('service').value=id+'.service';
   if(field('mode').value==='github'){
+    field('service').value=id+'.service';
     field('repo').value='/home/'+field('user').value+'/'+id;
-    field('env').value=field('repo').value+'/.env';
+    if(field('use_environment').checked)field('env').value=field('repo').value+'/.env';
     field('command').value=field('repo').value+'/.venv/bin/python main.py';
   }
 };
-field('repo').oninput=()=>{if(field('mode').value==='github')field('env').value=field('repo').value.replace(/\/$/,'')+'/.env';};
-function closeAdd(){if(!adding){$('add-dialog').close();addForm.reset();}}
+field('repo').oninput=()=>{if(field('mode').value==='github'&&field('use_environment').checked)field('env').value=field('repo').value.replace(/\/$/,'')+'/.env';};
+function syncEnvironmentMode(){
+  const github=field('mode').value==='github';
+  const enabled=!github||field('use_environment').checked;
+  field('env').disabled=!enabled;
+  field('env').required=github&&enabled;
+  field('environment').disabled=!github||!enabled;
+  field('environment').closest('label').hidden=!github||!enabled;
+  if(github)field('env').value=enabled&&field('repo').value?field('repo').value.replace(/\/$/,'')+'/.env':'';
+}
+field('use_environment').onchange=syncEnvironmentMode;
+async function detectService(){
+  if(field('mode').value!=='manual'||adding)return;
+  const service=field('service').value.trim();if(!service)return;
+  const requestId=++detectionRequest;
+  const keys=['name','user','repo','env'];
+  const before=Object.fromEntries(keys.map(key=>[key,field(key).value]));
+  detecting=true;$('detect-service').disabled=true;$('detected-env-label').hidden=true;
+  $('detect-status').textContent='Reading service settings…';
+  try{
+    const data=await api('discovery/'+encodeURIComponent(service));
+    if(requestId!==detectionRequest||!$('add-dialog').open||field('service').value.trim()!==service)return;
+    for(const key of keys)if(field(key).value===before[key])field(key).value=data[key]||'';
+    if(!field('id').value){
+      let id=service.replace(/\.service$/,'').toLowerCase().replace(/[^a-z0-9-]/g,'-');
+      if(!/^[a-z]/.test(id))id='bot-'+id;
+      field('id').value=id.slice(0,48);
+    }
+    $('detected-env').innerHTML='<option value="">Choose an environment file</option>'+data.env_files.map(path=>`<option value="${esc(path)}">${esc(path)}</option>`).join('');
+    $('detected-env-label').hidden=data.env_files.length<2;
+    $('detect-status').textContent=['Service settings loaded. Review the fields before adding.',...data.warnings].join(' ');
+  }catch(e){if(requestId===detectionRequest)$('detect-status').textContent=e.message+' You can fill in the fields manually.';}
+  finally{if(requestId===detectionRequest){detecting=false;$('detect-service').disabled=false;}}
+}
+$('detect-service').onclick=detectService;
+field('service').onchange=()=>{if(field('mode').value==='manual')detectService();};
+field('service').addEventListener('input',()=>{detectionRequest++;detecting=false;$('detect-service').disabled=false;$('detect-status').textContent='';$('detected-env-label').hidden=true;});
+$('detected-env').onchange=()=>{if($('detected-env').value)field('env').value=$('detected-env').value;};
+function closeAdd(){if(!adding){detectionRequest++;$('add-dialog').close();addForm.reset();}}
 $('close-add').onclick=closeAdd;
 $('add-dialog').oncancel=e=>{e.preventDefault();closeAdd();};
 addForm.onsubmit=async event=>{
   event.preventDefault();if(adding)return;
+  if(detecting){$('add-error').textContent='Wait for service settings to load, then review the fields.';return;}
   const data=Object.fromEntries(new FormData(addForm));data.python_setup=field('python_setup').checked;
   adding=true; $('add-error').textContent='';
   $('add-progress').textContent=data.mode==='github'?'Setting up your bot… Cloning and installing dependencies may take several minutes. Keep this window open.':'Checking the service and registering your bot…';

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from werkzeug.security import generate_password_hash
 from app import create_app
-from management import Store, Jobs, Health
+from management import Store, Jobs, Health, job_step, progress
 
 
 class ManagementTests(unittest.TestCase):
@@ -142,6 +142,45 @@ class ManagementTests(unittest.TestCase):
         jobs.submit('fail',fail);jobs.submit('success',lambda:{'ok':True});jobs.queue.join()
         states={j['label']:j['state'] for j in store.snapshot('jobs')}
         self.assertEqual(states,{'fail':'failed','success':'succeeded'})
+
+    def test_job_step_history_records_commands_and_failure_without_output(self):
+        from app import run
+        store=Store(); jobs=Jobs(store)
+        def execute():
+            progress('Checking registration')
+            run(['git','fetch','https://secret@example.invalid/repo'], user='pi')
+        with patch('app.subprocess.Popen') as popen:
+            popen.return_value.communicate.return_value=('', 'secret stderr token')
+            popen.return_value.returncode=1
+            jobs.submit('Update',execute,'test'); jobs.queue.join()
+        job=store.snapshot('jobs')[0]
+        self.assertEqual(job['state'],'failed')
+        step=next(s for s in job['steps'] if s['message']=='Git: fetch · as pi')
+        self.assertEqual(step['state'],'failed')
+        self.assertGreaterEqual(step['duration'],0)
+        self.assertIn('exit code 1',job['message'])
+        self.assertNotIn('secret',json.dumps(job))
+
+    def test_job_steps_are_live_bounded_and_persisted(self):
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            store=Store(Path(tmp)/'state.json'); jobs=Jobs(store)
+            entered=threading.Event(); release=threading.Event()
+            def execute():
+                with job_step('Installing dependencies'):
+                    entered.set(); release.wait(5)
+                for i in range(205): progress('Step '+str(i))
+            jobs.submit('Install',execute)
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertEqual(store.snapshot('jobs')[0]['steps'][-1]['state'],'running')
+                restored=Store(store.path).snapshot('jobs')[0]
+                self.assertEqual(restored['steps'][-1]['state'],'interrupted')
+            finally:
+                release.set(); jobs.queue.join()
+            job=Store(store.path).snapshot('jobs')[0]
+            self.assertEqual(job['state'],'succeeded')
+            self.assertEqual(len(job['steps']),200)
 
     def test_real_config_change_and_session_revocation_persist(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,9 +17,10 @@ import time
 from flask import Flask, jsonify, request, session, render_template
 from werkzeug.exceptions import HTTPException, Conflict
 from werkzeug.security import check_password_hash
-from onboarding import validate, provision, unit_text
-from management import Store, Jobs, Health, progress
+from onboarding import validate, provision, unit_text, BOT_ICONS
+from management import Store, Jobs, Health, progress, job_step
 from features import register_features
+from self_update import register_self_updates
 
 DEMO_BOTS = [
     dict(id="notifier", name="Channel notifier", description="Channel posts & notifications", service="channel-notifier.service", repo="/home/pi/bots/channel-notifier", env="/home/pi/bots/channel-notifier/.env", user="pi", state="active", enabled=True),
@@ -32,13 +33,19 @@ def run(args, timeout=25, user=None):
     executable=Path(args[0]).name
     stage='Running system command'
     if executable=='git':
-        operation=next((word for word in args[1:] if word in ('clone','fetch','pull','switch','status','rev-parse','rev-list')), 'inspect')
+        operation=next((word for word in args[1:] if word in ('clone','fetch','pull','switch','status','rev-parse','rev-list','diff','stash','update-ref','reset')), 'inspect')
         stage='Git: '+operation
     elif 'pip' in args: stage='Installing Python dependencies'
     elif 'venv' in args: stage='Creating Python environment'
     elif executable=='systemd-analyze': stage='Validating service file'
     elif executable=='systemctl': stage='Systemd: '+args[1]
-    progress(stage)
+    elif executable=='mkdir': stage='Creating checkout directory'
+    elif '-c' in args: stage='Configuring Git local exclusions'
+    with job_step(stage + (' · as '+user if user else '')):
+        return run_command(args, timeout, user, stage)
+
+
+def run_command(args, timeout, user, stage):
     if user:
         args = ["runuser", "-u", user, "--"] + args
     process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -52,9 +59,9 @@ def run(args, timeout=25, user=None):
             except ProcessLookupError: pass
         else: process.kill()
         process.communicate()
-        raise
+        raise ValueError(stage+' timed out after '+str(timeout)+' seconds. Check the Pi before retrying.') from None
     if process.returncode:
-        raise ValueError(stage+' failed. Check this operation directly on the Pi.')
+        raise ValueError(stage+' failed (exit code '+str(process.returncode)+'). Check this operation directly on the Pi.')
     return stdout.strip()
 
 
@@ -94,11 +101,15 @@ def create_app(config=None, demo=False, config_path=None):
                       SESSION_COOKIE_SECURE=config.get("secure_cookie", False))
     bots = copy.deepcopy(DEMO_BOTS if demo else config.get("bots", []))
     for bot in bots:
+        bot.setdefault('env', '')
+        bot.setdefault('icon', 'bot')
+        if not isinstance(bot['env'], str) or not isinstance(bot['icon'], str) or bot['icon'] not in BOT_ICONS:
+            raise ValueError('Invalid environment path or bot icon.')
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", bot["id"]) or not re.fullmatch(r"[a-zA-Z0-9_.@-]+\.service", bot["service"]) or bot["service"].startswith("-"):
             raise ValueError("Invalid bot ID or systemd service name.")
         if not re.fullmatch(r"[a-z_][a-z0-9_-]*", bot["user"]) or bot["user"] == "root":
             raise ValueError("Git must run as a non-root bot owner.")
-        if not demo and (not Path(bot["repo"]).is_absolute() or not Path(bot["env"]).is_absolute()):
+        if not demo and (not Path(bot["repo"]).is_absolute() or (bot["env"] and not Path(bot["env"]).is_absolute())):
             raise ValueError("Repository and environment paths must be absolute.")
     if len({b["id"] for b in bots}) != len(bots):
         raise ValueError("Bot IDs must be unique.")
@@ -132,6 +143,7 @@ def create_app(config=None, demo=False, config_path=None):
             config.update(changes)
 
     def persist_bot(bot):
+        progress('Saving bot registration: '+bot['id'])
         save_config({'bots': [*bots, bot]})
         locks[bot['id']] = threading.RLock()
         bots.append(bot)
@@ -142,6 +154,7 @@ def create_app(config=None, demo=False, config_path=None):
             if any(bot['id'] == b['id'] or bot['service'] == b['service'] or bot['repo'] == b['repo'] for b in bots):
                 raise Conflict("That ID, service or repository is already registered.")
             if demo:
+                progress('Demo: simulating bot registration; no files or services are created.')
                 bot.update(state='inactive', enabled=False)
                 demo_files[bot['id']] = {'env': data.get('environment', '# Demo environment\n'), 'service': unit_text(bot, data.get('command') or '/usr/bin/python3 main.py')}
                 persist_bot(bot)
@@ -187,7 +200,7 @@ def create_app(config=None, demo=False, config_path=None):
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template("index.html", bot_icons=BOT_ICONS)
 
     @app.get("/api/session")
     def session_info():
@@ -256,6 +269,7 @@ def create_app(config=None, demo=False, config_path=None):
         if action not in ("start", "stop", "restart", "enable", "disable", "pull"):
             raise ValueError("Unsupported action.")
         with locks[bot_id]:
+            progress(('Demo: simulating ' if demo else 'Requested ')+action+' · '+bot['service'])
             if demo:
                 if action in ("start", "restart", "stop"):
                     bot["state"] = "inactive" if action == "stop" else "active"
@@ -278,6 +292,8 @@ def create_app(config=None, demo=False, config_path=None):
             return dict(message=message)
 
     def file_path(bot, kind):
+        if kind == 'env' and not bot.get('env'):
+            raise ValueError('This bot has no environment file configured.')
         return Path(bot["env"]) if kind == "env" else Path("/etc/systemd/system") / bot["service"]
 
     @app.route("/api/bots/<bot_id>/files/<kind>", methods=["GET", "PUT"])
@@ -334,6 +350,7 @@ def create_app(config=None, demo=False, config_path=None):
         status=status, save_config=save_config, registration_lock=registration_lock,
         demo_files=demo_files, file_path=file_path, perform_action=perform_action,
         register_bot=register_bot, atomic_write=atomic_write, revision=revision))
+    register_self_updates(app, config, config_path, demo, store, jobs, run)
     return app
 
 

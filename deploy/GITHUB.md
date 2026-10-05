@@ -8,7 +8,7 @@ Create an empty public repository on GitHub, without adding a README, license or
 
 ```powershell
 git init -b main
-git add .gitignore .gitattributes README.md app.py features.py management.py onboarding.py setup.py requirements.txt config.example.json deploy static templates tests
+git add .gitignore .gitattributes README.md app.py features.py management.py onboarding.py git_review.py self_update.py setup.py requirements.txt config.example.json deploy static templates tests
 git diff --cached --stat
 git diff --cached
 git commit -m "Initial Pi Deck dashboard"
@@ -52,6 +52,12 @@ ssh -N -L 8081:127.0.0.1:8080 YOURUSER@raspberrypi.local
 Keep this terminal open and visit http://127.0.0.1:8081. Sign in and choose **Add bot → Add manually** for existing bots, or **From GitHub** to provision new ones. The service binds only to loopback; SSH carries the connection securely. Keep `secure_cookie` false for this HTTP-over-SSH setup; use true only when the browser connects over HTTPS.
 
 ## Update the dashboard
+
+After installing a version with **Pi Deck updates**, you can check upstream, review diffs, pull, install requirements, roll back, and restart directly from the dashboard. The source path is fixed to the running application's checkout. The supplied installation uses root's Git credentials and the checkout's configured upstream. Configure those on the Pi first. `manager_service` defaults to `pi-deck.service`; change it in private config only for a custom unit. In-app restart verifies the configured service's MainPID matches this dashboard and requires an empty background job queue.
+
+Code updates leave the current process running. Install any changed requirements, then use **Restart Pi Deck** and type `pi-deck`. A transient systemd timer performs the restart after the response returns. Refresh after a few seconds. Bot services are not restarted. If the updated application fails to start, recover over SSH using the commands below and the recorded original commit; a failed application cannot repair itself through its web UI.
+
+Private config/state must be outside the source checkout for in-app updates. Each modifying operation saves a private snapshot under `/etc/pi-deck/update-backups/` (or alongside your active config). These backups are retained until you remove them manually. Dependency rollback and automatic service-template installation are not included. The manual procedure below remains available for initial upgrades or recovery.
 
 Push reviewed source changes from the PC to GitHub. On the Pi, wait for dashboard jobs to finish. Stop the dashboard before backing up its private state; this pauses its schedules but leaves bot services running. Use a new backup directory each time:
 

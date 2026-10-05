@@ -11,7 +11,9 @@ from urllib.parse import urlencode
 from flask import jsonify, request, session, Response
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import Conflict, NotFound
-from onboarding import validate
+from onboarding import validate, service_defaults
+from management import progress
+from git_review import review as review_git, force_update
 
 
 def register_features(app, c):
@@ -22,18 +24,71 @@ def register_features(app, c):
         bot=find(bot_id)
         with c['locks'][bot_id]:
             for kind in ('env','service'):
+                if kind == 'env' and not bot.get('env'):continue
+                progress(('Demo: backing up ' if demo else 'Backing up ')+kind+' · '+bot_id)
                 path=c['file_path'](bot,kind)
                 if not demo and (path.is_symlink() or not path.is_file()):
                     raise ValueError('Backup requires existing regular environment and service files.')
                 text=c['demo_files'][bot_id][kind] if demo else path.read_text(encoding='utf-8')
                 if len(text.encode())>65536:raise ValueError('File is larger than the 64 KB backup limit.')
                 store.backup(bot_id,kind,path,text)
-        return {'message':'Environment and service backed up.'}
+        return {'message':'Environment and service backed up.' if bot.get('env') else 'Service backed up. No environment file configured.'}
 
     def clean(bot):
-        if git(bot,'status','--porcelain'):raise ValueError('Repository has local changes. Commit or stash them on the Pi first.')
+        if git(bot,'status','--porcelain'):raise ValueError('Repository has local changes. Open Settings & maintenance → Review changes / force update to inspect them, or commit/stash on the Pi.')
+
+    def git_preview(bot_id):
+        bot=find(bot_id)
+        if demo:
+            applied=store.snapshot('versions').get(bot_id,{}).get('force_demo',False)
+            return dict(demo=True,branch='main',upstream='origin/main',head='a7e9c42',target='f12ab83',
+                ahead=0,behind=0 if applied else 1,revision=c['revision'](json.dumps(bot,sort_keys=True)+str(applied)),
+                can_force=True,blockers=[],untracked=[],untracked_count=0,
+                sections=[dict(title='Unstaged changes on the Pi (demo)',patch='' if applied else
+                    'diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1,3 +1,3 @@\n import logging\n-logging.basicConfig(level=logging.INFO)\n+logging.basicConfig(level=logging.DEBUG)\n start_bot()'),
+                    dict(title='Incoming changes from upstream (demo)',patch='' if applied else
+                    'diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1,3 +1,4 @@\n import logging\n logging.basicConfig(level=logging.INFO)\n+configure_retries()\n start_bot()')])
+        return review_git(bot,git)
+
+    @app.post('/api/bots/<bot_id>/git-preview')
+    def preview_changes(bot_id):
+        find(bot_id)
+        with c['locks'][bot_id]:
+            result=git_preview(bot_id)
+            result['recovery']=store.snapshot('versions').get(bot_id,{}).get('recovery')
+        return jsonify(result)
+
+    @app.post('/api/bots/<bot_id>/force-update')
+    def force_changes(bot_id):
+        find(bot_id);data=request.get_json()
+        if data.get('confirm')!=bot_id or not isinstance(data.get('revision'),str):
+            raise ValueError('Review the diff, then type the bot ID to confirm replacing its local code.')
+        def execute():
+            with c['locks'][bot_id]:
+                bot=find(bot_id)
+                def save_recovery(recovery):
+                    with store.lock:
+                        store.data['versions'][bot_id]={**store.data['versions'].get(bot_id,{}),
+                            'recovery':recovery,'repo':bot['repo'],'rollback':recovery['head'],
+                            'return_branch':recovery['branch']}
+                        store.save()
+                if demo:
+                    if git_preview(bot_id)['revision']!=data['revision']:
+                        raise ValueError('Preview changed. Review again.')
+                    progress('Demo: simulating recovery copy and replacement with upstream code')
+                    with store.lock:
+                        store.data['versions'][bot_id]={'force_demo':True,'current':'f12ab83','branch':'main','behind':0,'ahead':0,'checked':time.time(),'repo':bot['repo']}
+                        store.save()
+                    return {'message':'Demo: force update simulated. No repository or service was changed.'}
+                result=force_update(bot,git,data['revision'],save_recovery)
+                with store.lock:
+                    store.data['versions'][bot_id].update(current=result['current'],branch=result['branch'],ahead=0,behind=0,checked=time.time())
+                    store.save()
+                return result
+        return jsonify(job=jobs.submit('Force update',execute,bot_id)),202
 
     def version(bot_id, operation):
+        progress(('Demo: simulating ' if demo else 'Maintenance: ')+operation+' · '+bot_id)
         bot=find(bot_id)
         with c['locks'][bot_id]:
             previous=store.snapshot('versions').get(bot_id,{})
@@ -129,7 +184,7 @@ def register_features(app, c):
         find(bot_id)
         with c['registration_lock'],c['locks'][bot_id]:
             bot=find(bot_id)
-            if data.get('revision')!=c['revision'](json.dumps({k:bot[k] for k in ('id','name','description','user','repo','env','service')},sort_keys=True)):
+            if data.get('revision')!=c['revision'](json.dumps({k:bot[k] for k in ('id','name','description','user','repo','env','service','icon')},sort_keys=True)):
                 raise Conflict('Bot settings changed. Reopen settings.')
             replacement=validate({**data,'id':bot_id,'mode':'manual'})
             if any(b['id']!=bot_id and (b['service']==replacement['service'] or b['repo']==replacement['repo']) for b in bots):raise Conflict('Service or checkout already registered.')
@@ -148,7 +203,7 @@ def register_features(app, c):
     @app.get('/api/bots/<bot_id>/settings')
     def read_settings(bot_id):
         bot=find(bot_id)
-        data={k:bot[k] for k in ('id','name','description','user','repo','env','service')}
+        data={k:bot[k] for k in ('id','name','description','user','repo','env','service','icon')}
         return jsonify(bot=data,revision=c['revision'](json.dumps(data,sort_keys=True)))
 
     @app.post('/api/bots/<bot_id>/remove')
@@ -205,6 +260,16 @@ def register_features(app, c):
                 except Exception:result.append({'bot':bot_id,'outcome':'failed; inspect this bot separately'})
             return {'message':'Bulk action complete. Review individual results.','results':result}
         return jsonify(job=jobs.submit('Bulk '+op,execute)),202
+
+    @app.get('/api/discovery/<service>')
+    def discovery_details(service):
+        if demo:
+            if service != 'weather-bot.service':
+                raise ValueError('Demo lookup supports weather-bot.service. You can still enter other details manually.')
+            return jsonify(service=service, name='Weather bot', user='pi', repo='/home/pi/bots/weather-bot',
+                           env='/home/pi/bots/weather-bot/.env', env_files=['/home/pi/bots/weather-bot/.env'],
+                           warnings=['Demo service settings. Review before adding.'])
+        return jsonify(service_defaults(service, run))
 
     @app.get('/api/discovery')
     def discovery():

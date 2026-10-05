@@ -4,6 +4,7 @@
   "username": "admin",
   "session_minutes": 60,
   "secure_cookie": false,
+  "manager_service": "pi-deck.service",
   "bots": [
     {
       "id": "my-bot",
