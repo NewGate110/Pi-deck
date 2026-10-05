@@ -40,12 +40,21 @@ def review(bot, git, fetch=True):
     root = Path(git(bot, 'rev-parse', '--show-toplevel')).resolve()
     if root != Path(bot['repo']).resolve():
         blockers.append('The registered directory must be the root of the Git checkout.')
-    protected = {p for p in target_files|index_files if Path(p).name == '.env' or Path(p).name.startswith('.env.')}
+    protected = {p for p in target_files|index_files
+                 if Path(p).name == '.env' or
+                 (Path(p).name.startswith('.env.') and Path(p).name != '.env.example')}
     if bot.get('env'):
         try: protected.add(Path(bot['env']).resolve().relative_to(root).as_posix())
         except ValueError: pass
-    if protected & (target_files|index_files):
-        blockers.append('An environment file is tracked by Git. Resolve it manually to avoid replacing configuration.')
+    for path in sorted(protected & (target_files|index_files)):
+        locations = []
+        if path in index_files:
+            locations.append('local Git index')
+        if path in target_files:
+            locations.append('upstream commit')
+        blockers.append('Possible environment file tracked by Git: '+path+' ('+', '.join(locations)+'). '
+                        'This check protects .env, .env.* except .env.example, and the configured environment path. '
+                        'Review it manually before replacing configuration.')
     collisions = []
     for path in untracked:
         path = path.rstrip('/')

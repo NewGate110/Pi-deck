@@ -107,6 +107,37 @@ class GitReviewTests(unittest.TestCase):
         self.assertFalse(preview['can_force'])
         self.assertTrue(any('assume-unchanged' in b for b in preview['blockers']))
 
+    def test_example_template_can_be_force_updated(self):
+        (self.origin/'.env.example').write_text('TOKEN=\n')
+        self.origin_git('add','.env.example');self.origin_git('commit','-m','Add template')
+        preview=review(self.bot,self.git)
+        self.assertFalse((self.repo/'.env.example').exists())
+        self.assertTrue(preview['can_force'],preview['blockers'])
+        force_update(self.bot,self.git,preview['revision'],lambda recovery:None)
+        self.assertEqual((self.repo/'.env.example').read_text(),'TOKEN=\n')
+        (self.repo/'.env.example').write_text('TOKEN=placeholder\n')
+        self.assertTrue(review(self.bot,self.git)['can_force'])
+
+    def test_example_used_as_actual_environment_is_still_protected(self):
+        (self.origin/'.env.example').write_text('TOKEN=\n')
+        self.origin_git('add','.env.example');self.origin_git('commit','-m','Add template')
+        self.bot['env']=str(self.repo/'.env.example')
+        preview=review(self.bot,self.git)
+        self.assertFalse(preview['can_force'])
+        self.assertTrue(any('.env.example (upstream commit)' in b for b in preview['blockers']))
+
+    def test_other_environment_variants_remain_protected(self):
+        (self.origin/'.env.production').write_text('TOKEN=private\n')
+        self.origin_git('add','.env.production');self.origin_git('commit','-m','Add environment')
+        preview=review(self.bot,self.git)
+        self.assertFalse(preview['can_force'])
+        self.assertTrue(any('.env.production (upstream commit)' in b for b in preview['blockers']))
+
+    def test_environment_blocker_names_custom_configured_path(self):
+        self.bot['env']=str(self.repo/'main.py')
+        preview=review(self.bot,self.git)
+        self.assertTrue(any('main.py (local Git index, upstream commit)' in b for b in preview['blockers']))
+
 
 class GitReviewApiTests(unittest.TestCase):
     def test_demo_preview_confirmation_and_isolation(self):
