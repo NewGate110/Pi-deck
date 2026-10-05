@@ -19,7 +19,7 @@ GitHub setup supports HTTPS and `git@github.com:owner/repo` URLs; private reposi
 
 If setup fails after cloning starts, the new checkout is kept for inspection and the bot is not registered. Any newly created service is removed. Finish setup on the Pi and register manually, or retry with a different new directory. Existing directories, environment files, and services are never overwritten. Repositories that contain a committed `.env` must be configured manually. Live provisioning needs verification on your Pi; the demo performs no actual installation.
 
-## Preview on this PC
+## Preview on PC
 
 Environment files are optional. For manual setup, leave the environment path blank if the bot does not use a file. For GitHub setup, uncheck **Create an environment file**. Pi Deck then omits `EnvironmentFile` from the generated service, skips environment backups, and shows **No environment file** on the bot card. Set a path later in registration settings to manage an existing file; service runtime settings remain separately editable.
 
