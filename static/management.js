@@ -3,6 +3,18 @@ const selectedBots=new Set();
 let gitReview=null;
 let managementPanel=null, managementBot=null, managementRevision=null, panelLoading=false, telemetryBusy=false, logsBusy=false;
 const dateText=t=>t?new Date(t*1000).toLocaleString():'—';
+let loginsBusy=false;
+async function refreshRecentLogins(){
+  if(loginsBusy||$('shell').hidden||document.hidden)return;
+  loginsBusy=true;
+  try{
+    const data=await api('logins');
+    $('recent-logins-list').innerHTML=data.logins.length?`<ul class="login-history">${data.logins.map(entry=>`<li><span class="login-account">${esc(entry.username)}</span><span class="login-address">${esc(entry.address)}</span><time datetime="${esc(new Date(entry.time*1000).toISOString())}">${esc(dateText(entry.time))}</time></li>`).join('')}</ul>`:'<p class="muted">No sign-ins recorded yet. History starts with your next sign-in.</p>';
+    $('logins-status').textContent=data.demo?'Demo session history':'Last '+data.logins.length+' sign-ins';
+  }catch(e){$('logins-status').textContent='Could not refresh sign-ins';}
+  finally{loginsBusy=false;}
+}
+setInterval(refreshRecentLogins,30000);
 const input=(name,label,value='',type='text')=>`<label>${esc(label)}<input name="${esc(name)}" type="${type}" value="${esc(value)}" ${type==='password'?'autocomplete="new-password"':''}></label>`;
 function syncSelection(){
   for(const id of selectedBots)if(!bots.some(b=>b.id===id))selectedBots.delete(id);
@@ -17,16 +29,51 @@ $('run-bulk').onclick=async()=>{
   if(!await confirmAction('Run on '+ids.length+' bots?',action==='update'?'Pull latest code and restart each selected bot. Dependency changes must be installed separately.':'Apply '+action+' to the selected bots?'))return;
   try{await api('bulk','POST',{ids,action});toast('Bulk action queued. Open Jobs for per-bot results.');}catch(e){toast(e.message);}
 };
+// Keep only observed readings; blank space and gaps never imply zero usage.
+const healthHistory=[];
+const healthMetrics=[['cpu_percent','CPU','Utilization','cpu'],['ram_percent','Memory','RAM in use','memory'],['disk_percent','Disk','Storage used','disk']];
+function healthGraph(key,now){
+  const segments=[];
+  let segment=[];
+  for(const sample of healthHistory){
+    const value=sample[key];
+    if(sample.at<now-60000)continue;
+    if(value==null||(segment.length&&sample.at-segment[segment.length-1].at>10000)){
+      if(segment.length)segments.push(segment);
+      segment=[];
+    }
+    if(value!=null)segment.push({...sample,x:((sample.at-now+60000)/60000*300).toFixed(2),y:(100-value).toFixed(2)});
+  }
+  if(segment.length)segments.push(segment);
+  return segments.map(points=>{
+    const first=points[0],last=points[points.length-1];
+    const line=points.map((p,i)=>`${i?'L':'M'}${p.x},${p.y}`).join(' ');
+    return `<path class="health-area" d="${line} L${last.x},100 L${first.x},100 Z"/><path class="health-line" d="${line}"/><circle class="health-point" cx="${last.x}" cy="${last.y}" r="2"/>`;
+  }).join('');
+}
+function renderHealth(h,now=Date.now(),stale=false){
+  const valid=v=>typeof v==='number'&&Number.isFinite(v);
+  const sample={at:now};
+  for(const [key] of healthMetrics)sample[key]=!stale&&valid(h[key])?Math.max(0,Math.min(100,h[key])):null;
+  healthHistory.push(sample);
+  while(healthHistory.length&&(healthHistory[0].at<now-60000||healthHistory.length>120))healthHistory.shift();
+  const latest=stale?null:healthHistory[healthHistory.length-1];
+  const cards=healthMetrics.map(([key,label,description,color])=>{
+    const value=latest?.[key],display=value==null?'—':Math.round(value)+'%';
+    return `<article class="health-card health-${color}"><div class="health-card-heading"><div><h3>${label}</h3><span>${description}</span></div><strong>${display}</strong></div><div class="health-scale"><span>${stale?'Waiting for connection':value==null?'Reading unavailable':'Last 60 seconds'}</span><span>100%</span></div><svg class="health-chart" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="${label}: ${display}. ${description} over the last 60 seconds${stale?'; connection lost':''}."><path class="health-grid" d="M0 0H300 M0 25H300 M0 50H300 M0 75H300 M0 100H300 M0 0V100 M50 0V100 M100 0V100 M150 0V100 M200 0V100 M250 0V100 M300 0V100"/>${healthGraph(key,now)}</svg><div class="health-axis"><span>60 seconds ago</span><span>Now · 0%</span></div></article>`;
+  }).join('');
+  const readings=[['Temperature',!stale&&valid(h.temperature)?h.temperature+'°C':'—'],['Uptime',!stale&&valid(h.uptime)?Math.floor(h.uptime/86400)+'d '+Math.floor(h.uptime%86400/3600)+'h':'—'],['Load · 1 min',!stale&&valid(h.load?.[0])?h.load[0].toFixed(2):'—']];
+  $('health-values').innerHTML=cards+`<div class="health-details">${readings.map(([label,value])=>`<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}<p>Refreshes every 5 seconds${h.demo?' · Demo readings':''}</p></div>`;
+  $('health-values').classList.toggle('is-stale',stale);
+}
 async function refreshHealth(){
   if(telemetryBusy||$('shell').hidden||document.hidden)return;
   telemetryBusy=true;
   try{
     const h=await api('health');
-    const percentage=v=>v==null?'—':Math.round(v)+'%';
-    const readings=[['CPU',percentage(h.cpu_percent)],['Memory',percentage(h.ram_percent)],['Disk',percentage(h.disk_percent)],['Temperature',h.temperature==null?'—':h.temperature+'°C'],['Uptime',h.uptime==null?'—':Math.floor(h.uptime/86400)+'d '+Math.floor(h.uptime%86400/3600)+'h'],['Load · 1 min',h.load?h.load[0].toFixed(2):'—']];
-    $('health-values').innerHTML=readings.map(([label,value])=>`<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('');
+    renderHealth(h);
     $('connection-status').textContent=(h.demo?'Demo readings · ':'Connected · ')+new Date().toLocaleTimeString();
-  }catch(e){$('connection-status').textContent='Disconnected · retrying automatically';}
+  }catch(e){renderHealth({},Date.now(),true);$('connection-status').textContent='Disconnected · retrying automatically';}
   finally{telemetryBusy=false;}
 }
 function showManagement(title,panel,bot=null){

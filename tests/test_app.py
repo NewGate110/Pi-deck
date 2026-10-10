@@ -27,6 +27,35 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/bots').status_code, 200)
         self.assertEqual(self.client.post('/api/bots/notifier/action', json={'action':'stop'}).status_code, 403)
 
+    def test_recent_logins_require_auth_and_record_success(self):
+        self.assertEqual(self.client.get('/api/logins').status_code,401)
+        result=self.client.post('/api/login',json={},headers={'X-CSRF-Token':self.token,'X-Forwarded-For':'203.0.113.9'},environ_overrides={'REMOTE_ADDR':'192.0.2.10'})
+        self.assertEqual(result.status_code,200)
+        entries=self.client.get('/api/logins').json['logins']
+        self.assertEqual(len(entries),1)
+        self.assertEqual(entries[0]['username'],'admin')
+        self.assertEqual(entries[0]['address'],'192.0.2.10')
+        self.assertEqual(set(entries[0]),{'username','address','time'})
+        self.client.get('/api/session')
+        self.assertEqual(len(self.client.get('/api/logins').json['logins']),1)
+
+    def test_recent_login_history_is_bounded_and_persists(self):
+        from management import Store
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'management-state.json'
+            path.write_text(json.dumps({'events':[]}))
+            store=Store(path)
+            self.assertEqual(store.snapshot('logins'),[])
+            for i in range(25):store.record_login('admin',str(i))
+            restored=Store(path).snapshot('logins')
+            self.assertEqual(len(restored),20)
+            self.assertEqual(restored[0]['address'],'24')
+            self.assertEqual(restored[-1]['address'],'5')
+            self.app.extensions['deck_store'].data['logins']=restored
+            self.login()
+            self.assertEqual(len(self.client.get('/api/logins').json['logins']),5)
+
     def test_running_and_startup_are_independent(self):
         self.login()
         with patch('app.run', side_effect=AssertionError('Demo invoked real command')):
@@ -73,6 +102,7 @@ class DashboardTests(unittest.TestCase):
         client2=app.test_client()
         token2=client2.get('/api/session').json['csrf']
         self.assertEqual(client2.post('/api/login',json={'password':'wrong'},headers={'X-CSRF-Token':token2}).status_code,429)
+        self.assertEqual(app.extensions['deck_store'].snapshot('logins'),[])
 
     def test_atomic_write(self):
         with tempfile.TemporaryDirectory() as tmp:

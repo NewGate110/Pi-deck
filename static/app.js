@@ -25,7 +25,7 @@ $('login-form').addEventListener('submit',async e=>{
   try { const data=await api('login','POST',{username:$('username').value,password:$('password').value}); csrf=data.csrf; $('password').value=''; await showDashboard(); }
   catch(e){$('login-error').textContent=e.message;} finally{$('login-button').disabled=false;}
 });
-async function showDashboard() { $('login').hidden=true; $('shell').hidden=false; await refresh(); if(typeof refreshHealth==='function')refreshHealth(); }
+async function showDashboard() { $('login').hidden=true; $('shell').hidden=false; await refresh(); if(typeof refreshHealth==='function')refreshHealth(); if(typeof refreshRecentLogins==='function')refreshRecentLogins(); }
 $('logout').onclick=async()=>{try{await api('logout','POST',{}); location.reload();}catch(e){toast(e.message);}};
 $('refresh').onclick=()=>refresh().catch(e=>toast(e.message));
 

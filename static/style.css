@@ -47,7 +47,7 @@ textarea:focus,.form-grid input:focus,.login-card input:focus{outline:2px solid 
 .empty{border-color:#52604e;color:#b7c5b1}
 ::selection{background:#627d4f;color:#fff}
 /* Black, red and white palette */
-:root{color:#f5f5f5;background:#090909;--green:#ed4149;--muted:#b0b0b0;--line:#343434;--lime:#fff}
+:root{color:#f5f5f5;background:#090909;--green:#ed4149;--muted:#b0b0b0;--line:#343434;--lime:#fff;--surface-panel:#141414;--surface-inset:#101010;--text-primary:#f5f5f5;--chart-primary:var(--green);--chart-secondary:var(--lime);--chart-tertiary:var(--muted)}
 body{background:#090909}
 .topbar{background:#101010;color:#f5f5f5}
 .brand-mark{background:#c92330;color:#fff}
@@ -157,7 +157,7 @@ textarea:focus,.form-grid input:focus,.login-card input:focus{outline-color:#ff7
 }
 @media(prefers-reduced-motion:reduce){button{transition:none}html{scroll-behavior:auto}}
 /* Management surfaces */
-.health-panel{padding:18px;border:1px solid var(--line);border-radius:9px;margin-bottom:16px;background:#141414}
+.health-panel{padding:18px;border:1px solid var(--line);border-radius:9px;margin-bottom:16px;background:var(--surface-panel)}
 .health-panel h2{font-size:15px}.health-panel .section-title{margin-bottom:14px}
 .health-values{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
 .health-values span{display:block;font-size:11px;color:var(--muted)}.health-values strong{display:block;font-size:21px;margin-top:8px;font-weight:500}
@@ -242,6 +242,33 @@ dialog .setup-modes strong{font-size:16px}
 .icon-choice input:focus-visible+.icon-tile{outline:3px solid #ff8590;outline-offset:3px}
 .icon-choice input:disabled+.icon-tile{opacity:.5;cursor:wait}
 @media(max-width:540px){.icon-options{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* Telemetry and sign-ins share the active theme's surfaces and accents. */
+.recent-logins{padding:18px;margin-bottom:24px;border:1px solid var(--line);border-radius:9px;background:var(--surface-panel)}
+.recent-logins h2{font-size:15px}.recent-logins .section-title{margin-bottom:8px}
+.login-history{list-style:none;margin:0 0 12px;padding:0}
+.login-history li{display:grid;grid-template-columns:minmax(100px,1fr) minmax(100px,1fr) auto;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px;overflow-wrap:anywhere}
+.login-account{font-weight:600;color:var(--text-primary)}.login-address{font-family:Consolas,monospace;color:var(--muted)}.login-history time{color:var(--muted);font-variant-numeric:tabular-nums}
+@media(max-width:600px){.login-history li{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.login-history time{grid-column:1/-1}.recent-logins{padding:14px}}
+.health-values{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.health-card{--chart:var(--chart-primary);min-width:0;padding:16px;background:var(--surface-inset);border:1px solid var(--line);border-radius:8px}
+.health-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.health-card h3{margin:0 0 5px;color:var(--chart);font-size:15px;font-weight:600}
+.health-card-heading strong{margin:0;font-size:30px;letter-spacing:-1px;font-variant-numeric:tabular-nums;color:var(--text-primary)}
+.health-values .health-card span{font-size:12px}
+.health-scale,.health-axis{display:flex;justify-content:space-between;gap:8px}
+.health-scale{margin:18px 0 7px}.health-axis{margin-top:7px}
+.health-values .health-axis span{font-size:11px;color:var(--muted)}
+.health-chart{display:block;width:100%;height:100px;overflow:hidden;color:var(--chart)}
+.health-grid{fill:none;stroke:currentColor;stroke-opacity:.18;stroke-width:1;vector-effect:non-scaling-stroke}
+.health-area{fill:currentColor;fill-opacity:.14}
+.health-line{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.health-point{fill:currentColor}
+.health-details{grid-column:1/-1;display:flex;gap:30px;align-items:center;flex-wrap:wrap;padding:14px 2px 0;border-top:1px solid var(--line)}
+.health-details>div{display:flex;align-items:baseline;gap:10px}
+.health-details strong{margin:0;font-size:16px;font-variant-numeric:tabular-nums}
+.health-details p{margin:0 0 0 auto;font-size:11px;color:var(--muted)}
+.is-stale .health-chart{opacity:.4}
+@media(max-width:760px){.health-values{grid-template-columns:minmax(0,1fr)}.health-card{padding:14px}.health-chart{height:90px}.health-details{gap:14px 24px}.health-details p{flex-basis:100%;margin:0}.health-details strong{font-size:16px}}
 .diff-section{margin-top:24px}.diff-section h3{font-size:17px}
 #management-content .diff-file{padding:0;overflow:hidden}
 #management-content .diff-file summary{padding:12px;background:#222;overflow-wrap:anywhere}

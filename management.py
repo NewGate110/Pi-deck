@@ -72,7 +72,7 @@ class Store:
     def __init__(self, path=None):
         self.path = Path(path) if path else None
         self.lock = threading.RLock()
-        self.data = dict(events=[], backups=[], jobs=[], versions={}, schedules=[], alerts={})
+        self.data = dict(events=[], logins=[], backups=[], jobs=[], versions={}, schedules=[], alerts={})
         if self.path and self.path.exists():
             if self.path.is_symlink(): raise ValueError('State file must not be a symlink.')
             self.data.update(json.loads(self.path.read_text(encoding='utf-8')))
@@ -92,6 +92,12 @@ class Store:
         with self.lock:
             self.data['events'].insert(0, dict(time=time.time(), action=action, bot=bot, outcome=outcome))
             del self.data['events'][300:]
+            self.save()
+
+    def record_login(self, username, address):
+        with self.lock:
+            self.data['logins'].insert(0, dict(time=time.time(), username=username, address=address))
+            del self.data['logins'][20:]
             self.save()
 
     def backup(self, bot, kind, path, content):

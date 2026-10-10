@@ -219,10 +219,15 @@ def create_app(config=None, demo=False, config_path=None):
             if not valid:
                 failures.append(now)
                 return jsonify(error="Incorrect username or password."), 401
+        store.record_login(config.get("username", "admin"), request.remote_addr or 'Unknown')
         session.clear()
         session.update(auth=True, csrf=secrets.token_hex(32), generation=config.get("session_generation", 0))
         session.permanent = True
         return jsonify(csrf=session["csrf"])
+
+    @app.get('/api/logins')
+    def recent_logins():
+        return jsonify(logins=store.snapshot('logins')[:5], demo=demo)
 
     @app.post("/api/logout")
     def logout():
