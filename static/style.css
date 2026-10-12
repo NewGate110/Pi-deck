@@ -99,6 +99,11 @@ dialog{width:min(880px,94vw);max-height:90vh;padding:0 22px 20px;border:2px soli
 #xp-terminal-form button{font:12px Tahoma,sans-serif}
 @media(max-width:500px){#xp-terminal-output{padding:12px;font-size:12px}.terminal-session{flex-wrap:wrap;gap:4px}#xp-terminal-form{gap:6px;padding:10px;font-size:12px}}
 /* Group routine updates; disclose recovery actions when needed. */
+.xp-system-restart{margin-top:20px;padding-top:18px;border-top:1px solid #c9cbd4}
+.xp-system-restart h3{font-size:13px;color:#35456a;margin:0 0 5px}
+#system-restart-form{grid-template-columns:minmax(0,1fr) auto;align-items:end;margin-top:12px}
+#system-restart-form button{min-height:34px;margin:0}
+@media(max-width:640px){#system-restart-form{grid-template-columns:1fr}#system-restart-form button{justify-self:start}}
 #management-content .xp-maintenance>summary{margin-bottom:10px}
 #management-content .xp-maintenance-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(0,1.5fr);gap:20px;align-items:center;padding:18px 0;border-top:1px solid #c9cbd4}
 #management-content .xp-maintenance-row h3{margin:0 0 5px;font-size:13px;color:#35456a}
