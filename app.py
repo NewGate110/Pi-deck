@@ -2,6 +2,7 @@
 import argparse
 import collections
 import copy
+import difflib
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ from werkzeug.exceptions import HTTPException, Conflict
 from werkzeug.security import check_password_hash
 from onboarding import validate, provision, unit_text, BOT_ICONS
 from management import Store, Jobs, Health, progress, job_step, command_output
+from git_hygiene import has_local_changes
 from features import register_features
 from self_update import register_self_updates
 
@@ -316,7 +318,7 @@ def create_app(config=None, demo=False, config_path=None):
                 store.event(action, bot_id)
                 return dict(message='Demo: latest version pulled.' if action == 'pull' else f'Demo: {action} completed.')
             if action == "pull":
-                if git(bot, "status", "--porcelain"):
+                if has_local_changes(bot, git):
                     raise ValueError("Repository has local changes. Commit or stash them on the Pi before updating.")
                 git(bot, "symbolic-ref", "--quiet", "--short", "HEAD")
                 git(bot, "rev-parse", "--abbrev-ref", "@{upstream}")
@@ -334,7 +336,7 @@ def create_app(config=None, demo=False, config_path=None):
             raise ValueError('This bot has no environment file configured.')
         return Path(bot["env"]) if kind == "env" else Path("/etc/systemd/system") / bot["service"]
 
-    @app.route("/api/bots/<bot_id>/files/<kind>", methods=["GET", "PUT"])
+    @app.route("/api/bots/<bot_id>/files/<kind>", methods=["GET", "PUT", "POST"])
     def files(bot_id, kind):
         bot = find_bot(bot_id)
         if kind not in ("env", "service"):
@@ -352,6 +354,13 @@ def create_app(config=None, demo=False, config_path=None):
             content = data.get("content")
             if not isinstance(content, str) or "\x00" in content or len(content.encode()) > 65536:
                 raise ValueError("File must be valid text under 64 KB.")
+            if request.method == "POST":
+                if len(current.encode()) > 65536:
+                    raise ValueError('Existing file exceeds the 64 KB preview limit.')
+                lines = difflib.unified_diff(current.splitlines(keepends=True), content.splitlines(keepends=True),
+                                             fromfile='Current file', tofile='Proposed file')
+                patch = ''.join(line if line.endswith('\n') else line+'\n\\ No newline at end of file\n' for line in lines)
+                return jsonify(patch=patch)
             if kind == "service" and ("[Service]" not in content or "[Unit]" not in content):
                 raise ValueError("Service file needs [Unit] and [Service] sections.")
             if len(current.encode()) > 65536:

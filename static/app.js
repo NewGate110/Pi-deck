@@ -120,13 +120,21 @@ $('save-file').onclick=async()=>{
   try {
     const data=await api(`bots/${editing.bot.id}/files/${editing.kind}`,'PUT',{content:$('editor').value,revision:editing.revision});
     editing.revision=data.revision; editing.content=$('editor').value; editing.saved=editing.content; $('save-note').textContent=data.message; toast(data.message);
+    $('change-preview').hidden=true;$('change-preview').textContent='';
   }catch(e){$('dialog-error').textContent=e.message;}finally{busy=false;$('save-file').disabled=false;}
 };
-$('preview-changes').onclick=()=>{
+$('editor').addEventListener('input',()=>{$('change-preview').hidden=true;$('change-preview').textContent='';});
+$('preview-changes').onclick=async()=>{
   if(!editing||editing.kind==='logs')return;
   if($('editor').disabled){$('dialog-error').textContent='Reveal environment values before previewing changes.';return;}
-  $('change-preview').textContent='CURRENT FILE\n'+editing.saved+'\n\nPROPOSED FILE\n'+$('editor').value;
-  $('change-preview').hidden=false;
+  const target=editing,content=$('editor').value,revision=editing.revision;
+  $('dialog-error').textContent='';
+  try{
+    const data=await api(`bots/${target.bot.id}/files/${target.kind}`,'POST',{content,revision});
+    if(editing!==target||!$('detail').open||$('editor').disabled||$('editor').value!==content||editing.revision!==revision)return;
+    $('change-preview').innerHTML=diffMarkup(data.patch);
+    $('change-preview').hidden=false;
+  }catch(e){if(editing===target)$('dialog-error').textContent=e.message;}
 };
 $('refresh-logs').onclick=async()=>{
   if(!editing)return; $('refresh-logs').disabled=true;

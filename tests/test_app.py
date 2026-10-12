@@ -76,6 +76,27 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.client.get(url).json['content'], content)
         self.assertEqual(self.client.put(url, **args).status_code, 409)
 
+    def test_file_diff_preview_does_not_save(self):
+        self.login()
+        for kind in ('env', 'service'):
+            url='/api/bots/notifier/files/'+kind
+            original=self.client.get(url).json
+            content=original['content']+'\n# proposed change\n'
+            response=self.post(url, {'content':content, 'revision':original['revision']})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('+# proposed change', response.json['patch'])
+            self.assertIn('@@', response.json['patch'])
+            self.assertEqual(self.client.get(url).json, original)
+            self.assertEqual(self.post(url, {'content':original['content'], 'revision':original['revision']}).json['patch'], '')
+            self.assertEqual(self.post(url, {'content':content, 'revision':'stale'}).status_code, 409)
+
+    def test_file_diff_preview_tracks_missing_final_newline(self):
+        self.login()
+        url='/api/bots/notifier/files/env'
+        original=self.client.get(url).json
+        response=self.post(url, {'content':'TOKEN=changed', 'revision':original['revision']})
+        self.assertIn('+TOKEN=changed\n\\ No newline at end of file\n', response.json['patch'])
+
     def test_allowlist_and_logout(self):
         self.login()
         self.assertEqual(self.post('/api/bots/notifier/action', {'action':'reboot'}).status_code, 400)

@@ -14,6 +14,7 @@ from werkzeug.exceptions import Conflict, NotFound
 from onboarding import validate, service_defaults
 from management import progress
 from git_review import review as review_git, force_update
+from git_hygiene import has_local_changes
 
 
 def register_features(app, c):
@@ -35,7 +36,7 @@ def register_features(app, c):
         return {'message':'Environment and service backed up.' if bot.get('env') else 'Service backed up. No environment file configured.'}
 
     def clean(bot):
-        if git(bot,'status','--porcelain'):raise ValueError('Repository has local changes. Open Settings & maintenance → Review changes / force update to inspect them, or commit/stash on the Pi.')
+        if has_local_changes(bot,git):raise ValueError('Repository has local changes. Open Settings & maintenance → Review changes / force update to inspect them, or commit/stash on the Pi.')
 
     def git_preview(bot_id):
         bot=find(bot_id)

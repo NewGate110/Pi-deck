@@ -67,7 +67,7 @@ function renderHealth(h,now=Date.now(),stale=false){
   $('health-values').classList.toggle('is-stale',stale);
 }
 async function refreshHealth(){
-  if(telemetryBusy||$('shell').hidden||document.hidden)return;
+  if(telemetryBusy||$('shell').hidden)return;
   telemetryBusy=true;
   try{
     const h=await api('health');

@@ -25,6 +25,11 @@ class GitWorkflowTests(unittest.TestCase):
             command(['git','-C',str(origin),'add','bot.py']);command(['git','-C',str(origin),'commit','-m','first'])
             first=command(['git','-C',str(origin),'rev-parse','HEAD'])
             command(['git','clone',str(origin),str(checkout)])
+            for name in ('venv', '.venv'):
+                environment=checkout/name
+                environment.mkdir()
+                (environment/'pyvenv.cfg').write_text('home = /usr/bin\n')
+                (environment/'keep.txt').write_text('local environment data\n')
             (origin/'bot.py').write_text('version=2\n')
             command(['git','-C',str(origin),'commit','-am','second'])
             bot=dict(id='test',name='Test',description='',service='test.service',user='pi',repo=str(checkout),env=str(checkout/'.env'))
@@ -35,6 +40,8 @@ class GitWorkflowTests(unittest.TestCase):
                 self.assertEqual(version('test','check')['behind'],1)
                 self.assertEqual(version('test','pull')['behind'],0)
                 self.assertEqual((checkout/'bot.py').read_text(),'version=2\n')
+                for name in ('venv', '.venv'):
+                    self.assertEqual((checkout/name/'keep.txt').read_text(),'local environment data\n')
                 version('test','pull')  # An up-to-date pull must preserve the last rollback point.
                 result=version('test','rollback')
                 self.assertTrue(result['detached'])
@@ -45,5 +52,17 @@ class GitWorkflowTests(unittest.TestCase):
                 (checkout/'bot.py').write_text('local changes\n')
                 with self.assertRaisesRegex(ValueError,'local changes'):version('test','rollback')
                 self.assertEqual((checkout/'bot.py').read_text(),'local changes\n')
+                (checkout/'bot.py').write_text('version=2\n')
+                (checkout/'notes.txt').write_text('untracked work\n')
+                with self.assertRaisesRegex(ValueError,'local changes'):version('test','pull')
+                (checkout/'notes.txt').unlink()
+                # A remote file colliding with the environment must still be
+                # refused by Git; we do not add ignores or force overwrite it.
+                (origin/'venv').mkdir()
+                (origin/'venv'/'keep.txt').write_text('upstream collision\n')
+                command(['git','-C',str(origin),'add','venv/keep.txt'])
+                command(['git','-C',str(origin),'commit','-m','collision'])
+                with self.assertRaises(ValueError):version('test','pull')
+                self.assertEqual((checkout/'venv'/'keep.txt').read_text(),'local environment data\n')
 
 if __name__=='__main__':unittest.main()
