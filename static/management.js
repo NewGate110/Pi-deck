@@ -60,7 +60,7 @@ function renderHealth(h,now=Date.now(),stale=false){
   const latest=stale?null:healthHistory[healthHistory.length-1];
   const cards=healthMetrics.map(([key,label,description,color])=>{
     const value=latest?.[key],display=value==null?'—':Math.round(value)+'%';
-    return `<article class="health-card health-${color}"><div class="health-card-heading"><div><h3>${label}</h3><span>${description}</span></div><strong>${display}</strong></div><div class="health-scale"><span>${stale?'Waiting for connection':value==null?'Reading unavailable':'Last 60 seconds'}</span><span>100%</span></div><svg class="health-chart" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="${label}: ${display}. ${description} over the last 60 seconds${stale?'; connection lost':''}."><path class="health-grid" d="M0 0H300 M0 25H300 M0 50H300 M0 75H300 M0 100H300 M0 0V100 M50 0V100 M100 0V100 M150 0V100 M200 0V100 M250 0V100 M300 0V100"/>${healthGraph(key,now)}</svg><div class="health-axis"><span>60 seconds ago</span><span>Now · 0%</span></div></article>`;
+    return `<article class="health-card health-${color}"><div class="health-card-heading"><div><h3>${label}</h3><span>${description}</span></div><strong>${display}</strong></div><div class="health-scale"><span>${stale?'Waiting for connection':value==null?'Reading unavailable':'Last 60 seconds'}</span><span>100%</span></div><svg class="health-chart" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="${label}: ${display}. ${description} over the last 60 seconds${stale?'; connection lost':''}."><path class="health-grid" d="M0 0H300 M0 25H300 M0 50H300 M0 75H300 M0 100H300 M0 0V100 M50 0V100 M100 0V100 M150 0V100 M200 0V100 M250 0V100 M300 0V100"/>${healthGraph(key,now)}</svg><div class="health-axis"><span>60 seconds ago</span></div></article>`;
   }).join('');
   const readings=[['Temperature',!stale&&valid(h.temperature)?h.temperature+'°C':'—'],['Uptime',!stale&&valid(h.uptime)?Math.floor(h.uptime/86400)+'d '+Math.floor(h.uptime%86400/3600)+'h':'—'],['Load · 1 min',!stale&&valid(h.load?.[0])?h.load[0].toFixed(2):'—']];
   $('health-values').innerHTML=cards+`<div class="health-details">${readings.map(([label,value])=>`<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}<p>Refreshes every 5 seconds${h.demo?' · Demo readings':''}</p></div>`;
@@ -115,9 +115,23 @@ async function openPanel(panel){
     }
   }catch(e){$('management-error').textContent=e.message;}
 }
+const jobOutputSeen=new Map();
+function jobCommandOutput(job,step,index){
+  if(!Object.hasOwn(step,'stdout'))return '';
+  const render=(stream,label)=>{
+    const text=step[stream]||'';
+    if(!text)return '';
+    const key=job.id+':'+step.time+':'+index+':'+stream;
+    const previous=jobOutputSeen.get(key)||'';
+    jobOutputSeen.set(key,text);
+    const prefix=text.startsWith(previous)?previous:'';
+    return `<div class="job-output-label">${label}</div><pre class="job-output" tabindex="0" aria-label="${esc(step.message)}: ${label}" data-output-key="${esc(key)}">${esc(prefix)}<span class="job-output-new">${esc(text.slice(prefix.length))}</span></pre>`;
+  };
+  return `<section class="job-command-output" aria-label="Command output">${render('stdout','Standard output')}${render('stderr','Error / diagnostic output')}${!step.stdout&&!step.stderr?`<p class="muted small">${step.state==='running'?'Waiting for command output…':'Command produced no output.'}</p>`:''}${step.exit_code!=null?`<p class="muted small">Exit code ${esc(step.exit_code)} · ${step.exit_code===0?'Completed successfully':'Command failed'}</p>`:''}${step.output_truncated?'<p class="muted small">Output limit reached; showing a shortened transcript.</p>':''}</section>`;
+}
 function jobSteps(job){
   if(!job.steps?.length)return '<p class="muted small">'+(job.state==='queued'?'Steps will appear when this job starts.':'Step history is unavailable for this older job.')+'</p>';
-  return '<ol class="job-steps" aria-label="Job step history">'+job.steps.map(step=>`<li data-state="${esc(step.state)}"><div><strong>${esc(step.message)}</strong><span class="muted small">${esc(step.state==='info'?'Recorded':step.state)} · ${esc(dateText(step.time))}${step.duration!=null?' · '+esc(step.duration)+'s':''}</span></div></li>`).join('')+'</ol>';
+  return '<ol class="job-steps" aria-label="Job step history">'+job.steps.map((step,index)=>`<li data-state="${esc(step.state)}"><div><strong>${esc(step.message)}</strong><span class="muted small">${esc(step.state==='info'?'Recorded':step.state)} · ${esc(dateText(step.time))}${step.duration!=null?' · '+esc(step.duration)+'s':''}</span>${jobCommandOutput(job,step,index)}</div></li>`).join('')+'</ol>'+(!job.steps.some(s=>Object.hasOwn(s,'stdout'))?'<p class="muted small">No CLI output recorded. Demo jobs simulate operations; other steps may run directly in Python.</p>':'');
 }
 async function refreshPanel(){
   if(panelLoading||!$('management-dialog').open)return;panelLoading=true;
@@ -125,7 +139,12 @@ async function refreshPanel(){
   try{
     if(panel==='jobs'){
       const data=await api('jobs');if(managementPanel!==panel)return;
+      const restoreFocus=keyboardBookmark($('management-content'));
+      const positions=new Map([...document.querySelectorAll('.job-output')].map(el=>[el.dataset.outputKey,{top:el.scrollTop,left:el.scrollLeft,bottom:el.scrollHeight-el.scrollTop-el.clientHeight<24}]));
+      for(const key of jobOutputSeen.keys())if(!data.jobs.some(j=>key.startsWith(j.id+':')))jobOutputSeen.delete(key);
       $('management-content').innerHTML=data.jobs.map(j=>`<div class="list-row"><div><strong>${esc(j.label)} ${esc(j.bot)}</strong><p class="muted small">${dateText(j.time)} · ${esc(j.state)}</p><p>${esc(j.message)}</p>${j.result?`<p class="muted">${esc(j.result.message||'')}</p>${j.result.current?`<p class="muted small">Commit ${esc(j.result.current)} · ${esc(j.result.branch||'detached')} · ${j.result.behind??'Unknown'} behind</p>`:''}${(j.result.results||[]).map(r=>`<p class="muted small">${esc(r.bot)}: ${esc(r.outcome)}</p>`).join('')}`:''}${jobSteps(j)}</div></div>`).join('')||'<p class="muted">No jobs yet.</p>';
+      document.querySelectorAll('.job-output').forEach(el=>{const p=positions.get(el.dataset.outputKey);el.scrollTop=!p||p.bottom?el.scrollHeight:p.top;el.scrollLeft=p?.left||0;});
+      restoreFocus();
     }else if(panel==='activity'){
       const data=await api('activity');if(managementPanel!==panel)return;
       $('management-content').innerHTML=data.events.map(e=>`<div class="list-row"><span>${esc(e.action)} · ${esc(e.bot)} · ${esc(e.outcome)}</span><time class="muted small">${dateText(e.time)}</time></div>`).join('')||'<p class="muted">No activity yet.</p>';

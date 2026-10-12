@@ -20,6 +20,22 @@ BOT_ICONS = {
     'shield': ('M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6l-9-4Z M8 12l3 3 5-6', 'Security'),
 }
 
+# Classic icon keys supported by the XP dashboard sprite.
+BOT_ICONS.update({
+    'computer': ("M4 4H28V28H4Z", 'My Computer'),
+    'documents': ("M4 4H28V28H4Z", 'My Documents'),
+    'folder': ("M4 4H28V28H4Z", 'Folder'),
+    'network': ("M4 4H28V28H4Z", 'Network Places'),
+    'recycle': ("M4 4H28V28H4Z", 'Recycle Bin'),
+    'browser': ("M4 4H28V28H4Z", 'Internet'),
+    'mail': ("M4 4H28V28H4Z", 'Outlook-style Mail'),
+    'drive': ("M4 4H28V28H4Z", 'Local Disk'),
+    'paint': ("M4 4H28V28H4Z", 'Paint'),
+    'terminal': ("M4 4H28V28H4Z", 'Command Prompt'),
+    'printer': ("M4 4H28V28H4Z", 'Printer'),
+    'control': ("M4 4H28V28H4Z", 'Control Panel'),
+})
+
 
 def service_defaults(service, run):
     """Read effective systemd properties, including drop-ins, without reading secrets."""

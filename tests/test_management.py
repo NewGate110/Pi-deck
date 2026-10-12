@@ -143,14 +143,16 @@ class ManagementTests(unittest.TestCase):
         states={j['label']:j['state'] for j in store.snapshot('jobs')}
         self.assertEqual(states,{'fail':'failed','success':'succeeded'})
 
-    def test_job_step_history_records_commands_and_failure_without_output(self):
+    def test_job_step_history_records_failure_output_and_redacts_credentials(self):
         from app import run
         store=Store(); jobs=Jobs(store)
         def execute():
             progress('Checking registration')
             run(['git','fetch','https://secret@example.invalid/repo'], user='pi')
         with patch('app.subprocess.Popen') as popen:
-            popen.return_value.communicate.return_value=('', 'secret stderr token')
+            import io
+            popen.return_value.stdout=io.StringIO('Fetching remote')
+            popen.return_value.stderr=io.StringIO('Connection refused\npassword=secret')
             popen.return_value.returncode=1
             jobs.submit('Update',execute,'test'); jobs.queue.join()
         job=store.snapshot('jobs')[0]
@@ -160,6 +162,38 @@ class ManagementTests(unittest.TestCase):
         self.assertGreaterEqual(step['duration'],0)
         self.assertIn('exit code 1',job['message'])
         self.assertNotIn('secret',json.dumps(job))
+        self.assertEqual(step['stdout'],'Fetching remote')
+        self.assertIn('Connection refused',step['stderr'])
+        self.assertEqual(step['exit_code'],1)
+
+    def test_real_command_output_is_visible_before_completion(self):
+        import sys
+        from app import run
+        store=Store(); jobs=Jobs(store)
+        jobs.submit('Output',lambda:run([sys.executable,'-u','-c',"import time; print('Started', flush=True); time.sleep(1.5); print('Finished')"]))
+        deadline=time.monotonic()+5
+        observed=False
+        while time.monotonic()<deadline:
+            job=store.snapshot('jobs')[0]
+            observed=any('Started' in s.get('stdout','') for s in job['steps']) and job['state']=='running'
+            if observed or job['state']=='failed':break
+            time.sleep(.05)
+        jobs.queue.join()
+        self.assertTrue(observed)
+        step=next(s for s in store.snapshot('jobs')[0]['steps'] if 'stdout' in s)
+        self.assertIn('Finished',step['stdout'])
+        self.assertEqual(step['exit_code'],0)
+
+    def test_timeout_preserves_output_and_marks_job_failed(self):
+        import sys
+        from app import run
+        store=Store(); jobs=Jobs(store)
+        jobs.submit('Timeout',lambda:run([sys.executable,'-u','-c',"import time; print('Before timeout', flush=True); time.sleep(5)"],timeout=.8))
+        jobs.queue.join()
+        job=store.snapshot('jobs')[0]
+        self.assertEqual(job['state'],'failed')
+        self.assertIn('timed out',job['message'])
+        self.assertTrue(any('Before timeout' in s.get('stdout','') for s in job['steps']))
 
     def test_job_steps_are_live_bounded_and_persisted(self):
         import threading

@@ -5,7 +5,7 @@ async function api(path, method='GET', body) {
   const response = await fetch('/api/'+path, {method, headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, ...(body === undefined ? {} : {body:JSON.stringify(body)})});
   const data = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== 'login') { $('shell').hidden=true; $('login').hidden=false; $('detail').close(); $('add-dialog').close(); $('management-dialog').close(); }
+    if (response.status === 401 && path !== 'login') { $('shell').hidden=true; $('login').hidden=false; $('detail').close(); $('add-dialog').close(); $('management-dialog').close(); document.getElementById('xp-terminal')?.close(); document.getElementById('xp-terminal-output')?.replaceChildren(); }
     throw new Error(data.error || 'Request failed. Please try again.');
   }
   return data;
@@ -17,7 +17,7 @@ async function init() {
     $('demo-login').hidden=!demo; $('credentials').hidden=demo;
     $('login-button').textContent=demo?'Enter demo workspace →':'Sign in →';
     $('demo-banner').hidden=!demo;
-    if (state.authenticated) await showDashboard(); else $('login').hidden=false;
+    if (state.authenticated) await showDashboard(); else { $('login').hidden=false; $(demo?'login-button':'username').focus(); }
   } catch(e) {toast(e.message);}
 }
 $('login-form').addEventListener('submit',async e=>{
@@ -25,7 +25,7 @@ $('login-form').addEventListener('submit',async e=>{
   try { const data=await api('login','POST',{username:$('username').value,password:$('password').value}); csrf=data.csrf; $('password').value=''; await showDashboard(); }
   catch(e){$('login-error').textContent=e.message;} finally{$('login-button').disabled=false;}
 });
-async function showDashboard() { $('login').hidden=true; $('shell').hidden=false; await refresh(); if(typeof refreshHealth==='function')refreshHealth(); if(typeof refreshRecentLogins==='function')refreshRecentLogins(); }
+async function showDashboard() { $('login').hidden=true; $('shell').hidden=false; $('bots-heading').focus(); await refresh(); if(typeof refreshHealth==='function')refreshHealth(); if(typeof refreshRecentLogins==='function')refreshRecentLogins(); }
 $('logout').onclick=async()=>{try{await api('logout','POST',{}); location.reload();}catch(e){toast(e.message);}};
 $('refresh').onclick=()=>refresh().catch(e=>toast(e.message));
 
@@ -46,15 +46,17 @@ function iconPicker(selected='bot'){
   return '<fieldset class="icon-picker wide"><legend>Bot icon</legend><div class="icon-options">'+Object.entries(botIcons).map(([key,label])=>`<label class="icon-choice"><input type="radio" name="icon" value="${esc(key)}" ${key===selected?'checked':''}><span class="icon-tile">${botIcon(key)}<span>${esc(label)}</span></span></label>`).join('')+'</div></fieldset>';
 }
 function render() {
+  const restoreFocus=keyboardBookmark($('bots'));
   $('total').textContent=bots.length; $('bot-count').textContent=bots.length;
   $('running').textContent=bots.filter(b=>b.state==='active').length;
   $('stopped').textContent=bots.filter(b=>b.state==='inactive').length;
   $('attention').textContent=bots.filter(b=>!['active','inactive'].includes(b.state)).length;
-  $('bots').innerHTML=bots.length?bots.map((b,i)=>`<article class="bot-card">
+  $('bots').innerHTML=bots.length?bots.map((b,i)=>`<article class="bot-card" data-card-bot="${esc(b.id)}">
     <div class="bot-top"><input type="checkbox" class="bot-select" data-select="${esc(b.id)}" aria-label="Select ${esc(b.name)}" ${typeof selectedBots!=='undefined'&&selectedBots.has(b.id)?'checked':''}><div class="bot-icon" title="${esc(botIcons[b.icon]||botIcons.bot)}" aria-hidden="true">${botIcon(b.icon)}</div><div><h3 class="bot-name">${esc(b.name)}</h3><div class="bot-description">${esc(b.description)}</div></div><span class="bot-status ${esc(b.state)}"><i class="dot ${b.state==='active'?'green':b.state==='inactive'?'gray':'orange'}"></i>${esc(b.state==='active'?'Running':b.state==='inactive'?'Stopped':b.state)}</span></div>
     <div class="bot-middle"><span class="service-name">▤ &nbsp; ${esc(b.service)}</span><span class="startup">Start on boot <button class="toggle ${b.enabled?'on':''}" role="switch" aria-checked="${b.enabled}" aria-label="Start ${esc(b.name)} on boot" data-bot="${esc(b.id)}" data-action="${b.enabled?'disable':'enable'}"></button></span></div>
     <div class="bot-bottom"><div class="tools"><button class="tool-button" data-bot="${esc(b.id)}" data-manage="1">Settings & maintenance</button>${b.env?`<button class="tool-button" data-bot="${esc(b.id)}" data-file="env">≡ &nbsp; Environment</button>`:'<span class="no-environment">No environment file</span>'}<button class="tool-button" data-bot="${esc(b.id)}" data-file="service">▤ &nbsp; Service file</button><button class="tool-button" data-bot="${esc(b.id)}" data-file="logs">⌁ &nbsp; Logs</button><button class="tool-button" data-bot="${esc(b.id)}" data-action="pull">↓ &nbsp; Pull latest</button></div><div class="run-controls"><button class="secondary" data-bot="${esc(b.id)}" data-action="restart">↻ &nbsp; Restart</button><button class="${b.state==='active'?'secondary':'primary'}" data-bot="${esc(b.id)}" data-action="${b.state==='active'?'stop':'start'}">${b.state==='active'?'◼ &nbsp; Stop':'▷ &nbsp; Start'}</button></div></div>
   </article>`).join(''):'<div class="empty">No bots configured yet. Choose Add bot to create one from GitHub or connect an existing service.</div>';
+  restoreFocus();
 }
 function confirmAction(title,message) {
   $('confirm-title').textContent=title; $('confirm-text').textContent=message; $('confirm-dialog').showModal();

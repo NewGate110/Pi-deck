@@ -1,5 +1,9 @@
 # Pi Deck
 
+The dashboard uses an XP-inspired interface with a muted violet-blue palette, 22 bot icon choices, grouped update/recovery controls, and a command-prompt-style background-job transcript. The app serves its interface from `templates/index.html` and `static/style.css`.
+
+**Command Prompt** supports `help`, `bots`, `status <bot-id>`, `jobs`, `start <bot-id>`, `stop <bot-id>`, `restart <bot-id>`, `clear`, and `exit`, with Up/Down history. It calls the same authenticated, CSRF-protected APIs as dashboard buttons. On a real installation these commands affect registered services; in demo mode they use sample data. Stop/restart require confirmation. This is a Pi Deck command interface, not an arbitrary shell or SSH terminal.
+
 A small web control room for existing Telegram bots on a Raspberry Pi 3. Python + Flask + Waitress, with no Node runtime or frontend build needed on the Pi.
 
 Features: password login, service status, start/stop/restart, independent startup toggles, environment and service file editors, fast-forward Git pulls, and recent journal logs. Demo data is explicitly labelled and never touches real services.
@@ -34,6 +38,8 @@ python -m venv .venv
 Open http://127.0.0.1:8080 and select **Enter demo workspace**. Demo changes live in memory and reset on restart. Do not use `--demo` for a real installation.
 
 ## Install on your Pi
+
+Desktop keyboard navigation: use Tab / Shift+Tab to move between controls, Enter / Space to activate them, and Escape to close dialogs. Arrow keys move between toolbar or bot buttons; Up / Down on bot buttons moves between bots. Focus command output with Tab to scroll it with the keyboard. Alt+Shift+J opens Jobs, Alt+Shift+N opens Add bot, Alt+Shift+R refreshes, Alt+Shift+B jumps to bot controls, and Alt+Shift+K opens keyboard help. Shortcuts are inactive inside fields and dialogs. Automatic refreshes preserve focus on bot controls and job output.
 
 Follow [the GitHub deployment guide](deploy/GITHUB.md) for a fresh installation, updates, and recovery. It installs application code in `/opt/pi-deck` and keeps private configuration in `/etc/pi-deck`.
 
@@ -113,7 +119,7 @@ See the Git documentation for [reset](https://git-scm.com/docs/git-reset) and [s
 
 ### Private state
 
-Background jobs include a live step history with timestamps, command durations, and failure exit codes. Open Jobs to follow setup, Git operations, dependency installation, service actions and backups. The latest 200 steps per job are retained with private management state; older jobs created before this feature have no step history. Command descriptions are recorded without raw arguments, environment values or stdout/stderr. Demo steps are labelled as simulations.
+Background jobs include a live step history with timestamps, command durations, exit codes, and actual stdout/stderr. New output fades into view on refresh, with reduced-motion support. Output is limited to 16,000 characters per command and 64,000 per job; shortened transcripts are labelled. Common credential assignments and HTTP URL credentials are redacted, but command output can still contain sensitive information and stays in private management state. Raw command arguments are not displayed. The latest 200 steps per job are retained; older jobs may lack output. Demo steps are labelled as simulations and do not produce actual CLI output.
 
 `management-state.json` is created beside the active configuration, atomically written with mode 0600 on Linux, and excluded from Git. It contains backups (which may include secrets), alert credentials, recent jobs/activity, version metadata and schedules. Protect it as carefully as `.env` and config.json; do not upload it or commit it. Demo state stays in memory. Run only one Pi Deck process per configuration/state directory. No external cloud service is used for management state.
 

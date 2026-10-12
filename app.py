@@ -18,7 +18,7 @@ from flask import Flask, jsonify, request, session, render_template
 from werkzeug.exceptions import HTTPException, Conflict
 from werkzeug.security import check_password_hash
 from onboarding import validate, provision, unit_text, BOT_ICONS
-from management import Store, Jobs, Health, progress, job_step
+from management import Store, Jobs, Health, progress, job_step, command_output
 from features import register_features
 from self_update import register_self_updates
 
@@ -41,25 +41,58 @@ def run(args, timeout=25, user=None):
     elif executable=='systemctl': stage='Systemd: '+args[1]
     elif executable=='mkdir': stage='Creating checkout directory'
     elif '-c' in args: stage='Configuring Git local exclusions'
-    with job_step(stage + (' · as '+user if user else '')):
-        return run_command(args, timeout, user, stage)
+    with job_step(stage + (' · as '+user if user else '')) as step:
+        return run_command(args, timeout, user, stage, step)
 
 
-def run_command(args, timeout, user, stage):
+def run_command(args, timeout, user, stage, step=None):
     if user:
         args = ["runuser", "-u", user, "--"] + args
     process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, cwd='/', start_new_session=os.name != 'nt',
+                               text=True, encoding='utf-8', errors='replace', cwd='/', start_new_session=os.name != 'nt',
                                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'LC_ALL': 'C'})
+    captured = [[], []]
+    readers = []
+    if step is not None:
+        def read_output(stream, target):
+            try:
+                for line in iter(stream.readline, ''): target.append(line)
+            finally:
+                stream.close()
+        for stream, target in zip((process.stdout, process.stderr), captured):
+            reader = threading.Thread(target=read_output, args=(stream, target), daemon=True)
+            reader.start()
+            readers.append(reader)
+    deadline = time.monotonic() + timeout
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        while True:
+            remaining = deadline-time.monotonic()
+            try:
+                if readers:
+                    process.wait(timeout=max(0, min(.5, remaining)))
+                    for reader in readers: reader.join()
+                    stdout, stderr = (''.join(parts) for parts in captured)
+                else:
+                    stdout, stderr = process.communicate(timeout=max(0, min(.5, remaining)))
+                break
+            except subprocess.TimeoutExpired as exc:
+                if readers: command_output(step, *(''.join(parts) for parts in captured))
+                else: command_output(step, exc.output, exc.stderr)
+                if time.monotonic() >= deadline: raise
     except subprocess.TimeoutExpired:
         if os.name != 'nt':
             try: os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError: pass
         else: process.kill()
-        process.communicate()
+        if readers:
+            process.wait()
+            for reader in readers: reader.join()
+            stdout, stderr = (''.join(parts) for parts in captured)
+        else:
+            stdout, stderr = process.communicate()
+        command_output(step, stdout, stderr, process.returncode)
         raise ValueError(stage+' timed out after '+str(timeout)+' seconds. Check the Pi before retrying.') from None
+    command_output(step, stdout, stderr, process.returncode)
     if process.returncode:
         raise ValueError(stage+' failed (exit code '+str(process.returncode)+'). Check this operation directly on the Pi.')
     return stdout.strip()

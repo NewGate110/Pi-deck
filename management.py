@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import secrets
 import shutil
 import tempfile
@@ -28,10 +29,10 @@ def progress(message):
 
 @contextmanager
 def job_step(message):
-    """Record trusted operation descriptions, never command arguments or output."""
+    """Record readable operation descriptions and bounded command output."""
     context = getattr(job_context, 'current', None)
     if not context:
-        yield
+        yield None
         return
     store, job = context
     entry = dict(message=message, time=time.time(), state='running')
@@ -42,7 +43,7 @@ def job_step(message):
         del job['steps'][:-200]
         store.save()
     try:
-        yield
+        yield entry
     except BaseException:
         entry_state = 'failed'
         raise
@@ -52,6 +53,28 @@ def job_step(message):
         with store.lock:
             entry.update(state=entry_state, duration=round(time.monotonic()-started, 2))
             store.save()
+
+
+def command_output(entry, stdout='', stderr='', exit_code=None):
+    context = getattr(job_context, 'current', None)
+    if not context or entry is None:
+        return
+    def clean(value):
+        if isinstance(value, bytes): value = value.decode('utf-8', errors='replace')
+        value = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', value or '')
+        value = re.sub(r'(https?://)[^\s/@]+@', r'\1[redacted]@', value)
+        return re.sub(r'(?im)((?:token|password|secret|api_key|authorization)\s*[:=]\s*)[^\r\n]+', r'\1[redacted]', value)
+    stdout, stderr = clean(stdout), clean(stderr)
+    store, job = context
+    with store.lock:
+        used = sum(len(s.get('stdout', '')) + len(s.get('stderr', '')) for s in job['steps'] if s is not entry)
+        limit = max(0, min(16000, 64000-used))
+        # Reserve room for errors even when standard output is verbose.
+        error_limit = min(len(stderr), limit//2) if stdout else limit
+        entry.update(stdout=stdout[:limit-error_limit], stderr=stderr[:error_limit],
+                     output_truncated=len(stdout)>limit-error_limit or len(stderr)>error_limit)
+        if exit_code is not None: entry['exit_code'] = exit_code
+        # Final state is persisted by job_step; live snapshots stay in memory.
 
 
 def private_json(path, data):
